@@ -53,7 +53,7 @@ export async function clearMessageCount(client, guildId, userId = null) {
     const key = `${guildId}_${userId}`;
     await client.db.msgCount.delete(key);
   } else {
-    const all = await client.db.msgCount.get(client.db.msgCount.all);
+    const all = await client.db.msgCount.entries();
     for (const id of Object.keys(all ?? {}).filter((k) => k.startsWith(`${guildId}_`))) {
       await client.db.msgCount.delete(id);
     }
@@ -74,7 +74,7 @@ export async function getLeaderboard(
   type = "all",
   limit = 10,
 ) {
-  const all = await client.db.msgCount.get(client.db.msgCount.all);
+  const all = await client.db.msgCount.entries();
   const today = moment().format("YYYY-MM-DD");
 
   const filtered = Object.entries(all ?? {})
