@@ -77,7 +77,7 @@ export default class StaffManage extends Command {
             0,
             Math.floor((data.expiresAt - Date.now()) / 86400000),
           );
-          return `${i + 1}. **${user.username}** \`[${user.id}]\`\n${info1} \`${days}\` day(s) left | Added by: <@${data.addedBy}>`;
+          return `${i + 1}. **${user.username}** \`[${user.id}]\`\n   \`${days}\` day(s) left | Added by: <@${data.addedBy}>`;
         });
 
         const pages = _.chunk(list, 6).map((chunk, i) =>

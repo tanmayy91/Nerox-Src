@@ -21,13 +21,13 @@ export const connect247 = async (client, guildId) => {
         client
           .embed()
           .desc(
-            `${client.emoji.info} A 24/7 player has been successfully created in <#${voiceChannel.id}> and linked to <#${textChannel.id}>.`,
+            `${client.emoji.check} 24/7 player connected to <#${voiceChannel.id}>`,
           ),
       ],
     })
     .then(async (message) => {
       await client.sleep(5);
-      await message.delete().catch(() => {}); // Ignore delete errors
+      await message.delete().catch(() => {});
     })
     .catch((err) => {
       console.error("Failed to send 247 connection message:", err);
