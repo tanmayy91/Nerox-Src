@@ -112,7 +112,7 @@ export function startApiServer(client) {
     try {
       const col = resolveCollection(client.db, name);
       if (!col) return res.status(404).json({ error: `Collection "${name}" not found.` });
-      const data = await col.get(col.all);
+      const data = await col.entries();
       res.json({ collection: name, data });
     } catch (err) {
       log(`API error on GET /api/db/${name}: ${err.message}`, "error");
@@ -320,8 +320,8 @@ export function startApiServer(client) {
   app.get("/api/kpi/stats", auth, async (_req, res) => {
     try {
       const [songsPlayed, commandsUsed] = await Promise.all([
-        client.db.stats.songsPlayed.get(client.db.stats.songsPlayed.all),
-        client.db.stats.commandsUsed.get(client.db.stats.commandsUsed.all),
+        client.db.stats.songsPlayed.entries(),
+        client.db.stats.commandsUsed.entries(),
       ]);
 
       const sumValues = (obj) =>
