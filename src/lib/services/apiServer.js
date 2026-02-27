@@ -1230,7 +1230,8 @@ export function startApiServer(client) {
       }
 
       // Check user status in various databases
-      const [isBlacklisted, isNoPrefix, isPremium, isBotMod] = await Promise.all([
+      // Note: botstaff = premium users, botmods = bot moderators
+      const [isBlacklisted, isNoPrefix, hasPremium, isBotMod] = await Promise.all([
         safeHas(client.db.blacklist, userId),
         safeHas(client.db.noPrefix, userId),
         safeHas(client.db.botstaff, userId),
@@ -1253,7 +1254,7 @@ export function startApiServer(client) {
             isOwner: client.owners?.includes(userId) || false,
             isAdmin: client.admins?.includes(userId) || false,
             isBotMod,
-            isPremium,
+            hasPremium,
             isNoPrefix,
             isBlacklisted,
           },

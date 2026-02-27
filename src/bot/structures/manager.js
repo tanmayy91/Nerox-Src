@@ -70,7 +70,7 @@ const sortedNodes = lavaConfig.nodes.sort(
 const lavalinkNodes = sortedNodes
   .filter((node) => isValidNode(node))
   .map((node) => ({
-    name: node.name || `node-${node.host}`,
+    name: node.name || `node-${node.host}:${node.port}`,
     url: `${node.host}:${node.port}`,
     auth: node.password,
     secure: node.secure || false,
@@ -163,7 +163,7 @@ export class Manager {
       manager.on("playerEnd", async (player) => {
         try {
           await player.data.get("playEmbed")?.delete();
-        } catch (_err) {
+        } catch {
           // Ignore errors when deleting play embed (message might be already deleted)
         }
       });
