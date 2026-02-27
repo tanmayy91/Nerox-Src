@@ -10,7 +10,7 @@ export async function addMessageCount(client, guildId, userId) {
   const key = `${guildId}_${userId}`;
   const today = moment().format("YYYY-MM-DD");
 
-  const data = (await client.db.mc.get(key)) || {
+  const data = (await client.db.msgCount.get(key)) || {
     allTime: 0,
     daily: {},
   };
@@ -18,7 +18,7 @@ export async function addMessageCount(client, guildId, userId) {
   data.allTime += 1;
   data.daily[today] = (data.daily[today] || 0) + 1;
 
-  await client.db.mc.set(key, data);
+  await client.db.msgCount.set(key, data);
 }
 
 /**
@@ -31,7 +31,7 @@ export async function addMessageCount(client, guildId, userId) {
 export async function getMessageCount(client, guildId, userId) {
   const key = `${guildId}_${userId}`;
   const today = moment().format("YYYY-MM-DD");
-  const data = (await client.db.mc.get(key)) || {
+  const data = (await client.db.msgCount.get(key)) || {
     allTime: 0,
     daily: {},
   };
@@ -51,12 +51,12 @@ export async function getMessageCount(client, guildId, userId) {
 export async function clearMessageCount(client, guildId, userId = null) {
   if (userId) {
     const key = `${guildId}_${userId}`;
-    await client.db.mc.delete(key);
+    await client.db.msgCount.delete(key);
   } else {
-    const all = await client.db.mc.all();
+    const all = await client.db.msgCount.all();
     const filtered = all.filter((x) => x.ID.startsWith(`${guildId}_`));
     for (const entry of filtered) {
-      await client.db.mc.delete(entry.ID);
+      await client.db.msgCount.delete(entry.ID);
     }
   }
 }
@@ -75,7 +75,7 @@ export async function getLeaderboard(
   type = "all",
   limit = 10,
 ) {
-  const all = await client.db.mc.all();
+  const all = await client.db.msgCount.all();
   const today = moment().format("YYYY-MM-DD");
 
   const filtered = all
