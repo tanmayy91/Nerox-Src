@@ -69,7 +69,7 @@ export class ExtendedClient extends Client {
       ticket: josh("ticket"),
       botmods: josh("botmods"),
       giveaway: josh("giveaway"),
-      mc: josh("msgCount"),
+      msgCount: josh("msgCount"),
       botstaff: josh("botstaff"), // Bot premium users
       redeemCode: josh("redeemCode"),
       serverstaff: josh("serverstaff"), // Server premium
