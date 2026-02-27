@@ -19,8 +19,7 @@ export default class Autoplay extends Command {
             client
               .embed()
               .desc(
-                `${client.emoji.check} **Boom!** 247 mode **deactivated**\n\n` +
-                  `${client.emoji.info} All 247 data wiped clean! Time to chill.`,
+                `${client.emoji.check} 24/7 mode **deactivated**`,
               ),
           ],
         });
@@ -36,8 +35,8 @@ export default class Autoplay extends Command {
           client
             .embed()
             .desc(
-              `${client.emoji.check} **Yo!** 247 mode **activated**\n\n` +
-                `${client.emoji.info} It's set! Text Channel: <#${player.textId}> and Voice Channel: <#${player.voiceId}>. Now it's on!`,
+              `${client.emoji.check} 24/7 mode **activated**\n` +
+                `Text: <#${player.textId}> | Voice: <#${player.voiceId}>`,
             ),
         ],
       });
