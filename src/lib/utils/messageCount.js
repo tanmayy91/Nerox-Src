@@ -1,4 +1,5 @@
 import moment from "moment";
+import { getAllEntries } from "./dbUtils.js";
 
 /**
  * Add a message to the user's count.
@@ -53,7 +54,7 @@ export async function clearMessageCount(client, guildId, userId = null) {
     const key = `${guildId}_${userId}`;
     await client.db.msgCount.delete(key);
   } else {
-    const all = await client.db.msgCount.entries();
+    const all = await getAllEntries(client.db.msgCount);
     for (const id of Object.keys(all ?? {}).filter((k) => k.startsWith(`${guildId}_`))) {
       await client.db.msgCount.delete(id);
     }
@@ -74,7 +75,7 @@ export async function getLeaderboard(
   type = "all",
   limit = 10,
 ) {
-  const all = await client.db.msgCount.entries();
+  const all = await getAllEntries(client.db.msgCount);
   const today = moment().format("YYYY-MM-DD");
 
   const filtered = Object.entries(all ?? {})
