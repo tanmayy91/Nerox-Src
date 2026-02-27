@@ -1,6 +1,18 @@
 import moment from "moment";
 
 /**
+ * Helper function to get all entries from a Josh collection.
+ * Josh doesn't have an entries() method, so we use filter(() => true).
+ * Returns an object like { key1: value1, key2: value2 }.
+ * @param {object} col - The Josh collection instance.
+ * @returns {Promise<object>} - An object containing all key-value pairs.
+ */
+async function getAllEntries(col) {
+  const entries = await col.filter(() => true);
+  return Object.fromEntries(entries);
+}
+
+/**
  * Add a message to the user's count.
  * @param {Client} client - The bot client.
  * @param {string} guildId - The server ID.
@@ -53,7 +65,7 @@ export async function clearMessageCount(client, guildId, userId = null) {
     const key = `${guildId}_${userId}`;
     await client.db.msgCount.delete(key);
   } else {
-    const all = await client.db.msgCount.entries();
+    const all = await getAllEntries(client.db.msgCount);
     for (const id of Object.keys(all ?? {}).filter((k) => k.startsWith(`${guildId}_`))) {
       await client.db.msgCount.delete(id);
     }
@@ -74,7 +86,7 @@ export async function getLeaderboard(
   type = "all",
   limit = 10,
 ) {
-  const all = await client.db.msgCount.entries();
+  const all = await getAllEntries(client.db.msgCount);
   const today = moment().format("YYYY-MM-DD");
 
   const filtered = Object.entries(all ?? {})

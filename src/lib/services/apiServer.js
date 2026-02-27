@@ -3,6 +3,18 @@ import express from "express";
 import { log } from "../../logger.js";
 
 /**
+ * Helper function to get all entries from a Josh collection.
+ * Josh doesn't have an entries() method, so we use filter(() => true).
+ * Returns an object like { key1: value1, key2: value2 }.
+ * @param {object} col - The Josh collection instance.
+ * @returns {Promise<object>} - An object containing all key-value pairs.
+ */
+async function getAllEntries(col) {
+  const entries = await col.filter(() => true);
+  return Object.fromEntries(entries);
+}
+
+/**
  * Allowed Josh DB collection names (flat + nested).
  * Nested collections use slash notation (e.g. "stats/songsPlayed").
  */
@@ -112,7 +124,7 @@ export function startApiServer(client) {
     try {
       const col = resolveCollection(client.db, name);
       if (!col) return res.status(404).json({ error: `Collection "${name}" not found.` });
-      const data = await col.entries();
+      const data = await getAllEntries(col);
       res.json({ collection: name, data });
     } catch (err) {
       log(`API error on GET /api/db/${name}: ${err.message}`, "error");
@@ -320,8 +332,8 @@ export function startApiServer(client) {
   app.get("/api/kpi/stats", auth, async (_req, res) => {
     try {
       const [songsPlayed, commandsUsed] = await Promise.all([
-        client.db.stats.songsPlayed.entries(),
-        client.db.stats.commandsUsed.entries(),
+        getAllEntries(client.db.stats.songsPlayed),
+        getAllEntries(client.db.stats.commandsUsed),
       ]);
 
       const sumValues = (obj) =>
