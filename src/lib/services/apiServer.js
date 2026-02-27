@@ -807,7 +807,7 @@ export function startApiServer(client) {
       res.json(
         successResponse({
           count: players.length,
-          totalQueuedTracks: players.reduce((sum, p) => sum + (p.queue?.length ?? 0), 0),
+          totalQueuedTracks: players.reduce((sum, p) => sum + p.queue.length, 0),
           players,
         }),
       );
@@ -839,7 +839,7 @@ export function startApiServer(client) {
             return order * (a.joinedTimestamp - b.joinedTimestamp);
           case "memberCount":
           default:
-            return order * (b.memberCount - a.memberCount);
+            return order * (a.memberCount - b.memberCount);
         }
       });
 
