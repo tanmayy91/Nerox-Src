@@ -144,18 +144,21 @@ function requestLogger(req, res, next) {
 
 /**
  * Authentication middleware.
- * Accepts the key via the `x-api-key` header or the `apiKey` query param.
+ * Accepts the key via the `x-api-key` header (recommended) or the `apiKey` query param.
+ * Note: Using query params for API keys is less secure as they may appear in logs.
+ * Prefer using the x-api-key header for production use.
  * @param {string} apiKey - The required API key.
  * @returns {Function} Express middleware function.
  */
 function authenticate(apiKey) {
   return (req, res, next) => {
+    // Prefer header over query param for security (headers don't appear in logs/URLs)
     const provided = req.headers["x-api-key"] || req.query.apiKey;
     if (!provided || provided !== apiKey) {
       return res.status(401).json({
         success: false,
         error: "Unauthorized",
-        message: "Invalid or missing API key. Provide via x-api-key header or apiKey query param.",
+        message: "Invalid or missing API key. Provide via x-api-key header (recommended) or apiKey query param.",
       });
     }
     next();
@@ -305,6 +308,11 @@ export function startApiServer(client) {
       successResponse({
         name: "Nerox Bot API",
         version: "2.0.0",
+        authentication: {
+          method: "API Key",
+          header: "x-api-key (recommended)",
+          queryParam: "apiKey (less secure, may appear in logs)",
+        },
         endpoints: {
           health: "GET /api/health",
           database: {
