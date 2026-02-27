@@ -112,7 +112,7 @@ export function startApiServer(client) {
     try {
       const col = resolveCollection(client.db, name);
       if (!col) return res.status(404).json({ error: `Collection "${name}" not found.` });
-      const data = await col.getAll();
+      const data = await col.all();
       res.json({ collection: name, data });
     } catch (err) {
       log(`API error on GET /api/db/${name}: ${err.message}`, "error");
@@ -320,18 +320,21 @@ export function startApiServer(client) {
   app.get("/api/kpi/stats", auth, async (_req, res) => {
     try {
       const [songsPlayed, commandsUsed] = await Promise.all([
-        client.db.stats.songsPlayed.getAll(),
-        client.db.stats.commandsUsed.getAll(),
+        client.db.stats.songsPlayed.all(),
+        client.db.stats.commandsUsed.all(),
       ]);
 
-      const sumValues = (map) =>
-        Object.values(map ?? {}).reduce((acc, v) => acc + (Number(v) || 0), 0);
+      const sumValues = (entries) =>
+        (entries ?? []).reduce((acc, e) => acc + (Number(e.data) || 0), 0);
+
+      const toObject = (entries) =>
+        Object.fromEntries((entries ?? []).map((e) => [e.ID, e.data]));
 
       res.json({
         totalSongsPlayed: sumValues(songsPlayed),
         totalCommandsUsed: sumValues(commandsUsed),
-        perGuildSongsPlayed: songsPlayed ?? {},
-        perGuildCommandsUsed: commandsUsed ?? {},
+        perGuildSongsPlayed: toObject(songsPlayed),
+        perGuildCommandsUsed: toObject(commandsUsed),
       });
     } catch (err) {
       log(`API error on GET /api/kpi/stats: ${err.message}`, "error");
