@@ -75,8 +75,8 @@ export default class ContextCreate {
         client.db.botstaff.get(ctx.author.id), // Premium Users - get full data for expiry check
       ]);
 
-      const botAdmin = owner || admin ? true : false;
-      const np = botAdmin || isNoPrefixActive(noPrefixData) ? true : false;
+      const botAdmin = owner || admin;
+      const np = botAdmin || isNoPrefixActive(noPrefixData);
       const staff = isPremiumActive(premiumData);
 
       if (bl) return;

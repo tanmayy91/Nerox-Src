@@ -22,7 +22,7 @@ export default class Backup extends Command {
     this.description = "Sends backup-zip to DM";
     this.execute = async (client, ctx) => {
       const metadata = JSON.parse(
-        await readFile(resolve(__dirname, "../../../package.json"), "utf8"),
+        await readFile(resolve(__dirname, "../../../../package.json"), "utf8"),
       );
       const time = moment().tz("Asia/Kolkata").format("DD_MM_YY_hh_mm");
       const file = `./Nerox_v${metadata.version}_${time}.zip`;

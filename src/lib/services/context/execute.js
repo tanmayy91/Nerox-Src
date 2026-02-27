@@ -48,7 +48,7 @@ export const execute = async (ctx, command, args) => {
               .desc(
                 `${client.emoji.info} **Command \`${command.name}\` used**\n\n` +
                   `${client.emoji.info} **Content:** ${ctx.content}\n` +
-                  `${client.emoji.info} **User:** ${ctx.author.tag} \`[${ctx.author.id}]\`\n` +
+                  `${client.emoji.info} **User:** ${ctx.author.username} \`[${ctx.author.id}]\`\n` +
                   `${client.emoji.info} **Guild:** ${ctx.guild.name} \`[${ctx.guild.id}]\`\n` +
                   `${client.emoji.info} **Channel:** ${ctx.channel.name} \`[${ctx.channel.id}]\``,
               ),

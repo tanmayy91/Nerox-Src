@@ -77,7 +77,7 @@ export default class StaffManage extends Command {
             0,
             Math.floor((data.expiresAt - Date.now()) / 86400000),
           );
-          return `${i + 1}. **${user.tag}** \`[${user.id}]\`\n${info1} \`${days}\` day(s) left | Added by: <@${data.addedBy}>`;
+          return `${i + 1}. **${user.username}** \`[${user.id}]\`\n${info1} \`${days}\` day(s) left | Added by: <@${data.addedBy}>`;
         });
 
         const pages = _.chunk(list, 6).map((chunk, i) =>
@@ -112,7 +112,7 @@ export default class StaffManage extends Command {
             embeds: [
               client
                 .embed()
-                .desc(`${info} \`${userArg.tag}\` already has premium.`),
+                .desc(`${info} \`${userArg.username}\` already has premium.`),
             ],
           });
         }
@@ -139,7 +139,7 @@ export default class StaffManage extends Command {
             client
               .embed()
               .desc(
-                `${check} \`${userArg.tag}\` is now a premium user for \`${duration}\` day(s).`,
+                `${check} \`${userArg.username}\` is now a premium user for \`${duration}\` day(s).`,
               ),
           ],
         });
@@ -152,7 +152,7 @@ export default class StaffManage extends Command {
             embeds: [
               client
                 .embed()
-                .desc(`${info1} \`${userArg.tag}\` does not have premium.`),
+                .desc(`${info1} \`${userArg.username}\` does not have premium.`),
             ],
           });
         }
@@ -164,7 +164,7 @@ export default class StaffManage extends Command {
             client
               .embed()
               .desc(
-                `${check} Successfully removed \`${userArg.tag}\` from premium.`,
+                `${check} Successfully removed \`${userArg.username}\` from premium.`,
               ),
           ],
         });

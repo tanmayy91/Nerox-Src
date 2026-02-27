@@ -19,9 +19,9 @@ export default class Avatar extends Command {
     const target = ctx.mentions.users.first() || ctx.author;
     const member = ctx.guild?.members.cache.get(target.id);
 
-    const userAvatar = target.displayAvatarURL({ dynamic: true, size: 4096 });
+    const userAvatar = target.displayAvatarURL({ forceStatic: false, size: 4096 });
     const serverAvatar = member?.avatar
-      ? member.displayAvatarURL({ dynamic: true, size: 4096 })
+      ? member.displayAvatarURL({ forceStatic: false, size: 4096 })
       : null;
 
     // Send embed with default: user avatar

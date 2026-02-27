@@ -15,7 +15,7 @@ export default class Ping extends Command {
 
   execute = async (client, ctx) => {
     const msg = await ctx.reply({
-      embeds: [client.desc(`Checking latency...`)],
+      embeds: [client.embed().desc(`Checking latency...`)],
     });
 
     const start = performance.now();

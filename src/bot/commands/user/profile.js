@@ -129,7 +129,7 @@ export default class Profile extends Command {
             `${client.emoji.info1} Account Age: **${accountAge} days**\n` +
             `${client.emoji.info1} Joined Discord: <t:${Math.floor(ctx.author.createdTimestamp / 1000)}:R>`,
         )
-        .setFooter({ text: `Page 1/4 • ${ctx.author.tag}` })
+        .setFooter({ text: `Page 1/4 • ${ctx.author.username}` })
         .setTimestamp();
 
       const badgesEmbed = client

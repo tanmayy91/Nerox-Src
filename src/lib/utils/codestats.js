@@ -45,15 +45,10 @@ export const getCodeStats = async () => {
         continue;
       }
       stats.files++;
-      const [characters, lines, whitespaces] = await Promise.all([
-        await readFile(entityPath, "utf8").then((content) => content.length),
-        await readFile(entityPath, "utf8").then(
-          (content) => content.split("\n").length,
-        ),
-        await readFile(entityPath, "utf8").then(
-          (content) => (content.match(/\s/g) || []).length,
-        ),
-      ]);
+      const content = await readFile(entityPath, "utf8");
+      const lines = content.split("\n").length;
+      const characters = content.length;
+      const whitespaces = (content.match(/\s/g) || []).length;
       stats.lines += lines;
       stats.characters += characters;
       stats.whitespaces += whitespaces;

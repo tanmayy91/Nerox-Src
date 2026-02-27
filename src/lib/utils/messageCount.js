@@ -53,10 +53,9 @@ export async function clearMessageCount(client, guildId, userId = null) {
     const key = `${guildId}_${userId}`;
     await client.db.msgCount.delete(key);
   } else {
-    const all = await client.db.msgCount.all();
-    const filtered = all.filter((x) => x.ID.startsWith(`${guildId}_`));
-    for (const entry of filtered) {
-      await client.db.msgCount.delete(entry.ID);
+    const all = await client.db.msgCount.get(client.db.msgCount.all);
+    for (const id of Object.keys(all ?? {}).filter((k) => k.startsWith(`${guildId}_`))) {
+      await client.db.msgCount.delete(id);
     }
   }
 }
@@ -75,17 +74,15 @@ export async function getLeaderboard(
   type = "all",
   limit = 10,
 ) {
-  const all = await client.db.msgCount.all();
+  const all = await client.db.msgCount.get(client.db.msgCount.all);
   const today = moment().format("YYYY-MM-DD");
 
-  const filtered = all
-    .filter((x) => x.ID.startsWith(`${guildId}_`))
-    .map((x) => {
-      const userId = x.ID.split("_")[1];
-      const count =
-        type === "daily" ? x.data?.daily?.[today] || 0 : x.data?.allTime || 0;
-      return { userId, count };
-    })
+  const filtered = Object.entries(all ?? {})
+    .filter(([id]) => id.startsWith(`${guildId}_`))
+    .map(([id, data]) => ({
+      userId: id.split("_")[1],
+      count: type === "daily" ? data?.daily?.[today] || 0 : data?.allTime || 0,
+    }))
     .filter((x) => x.count > 0)
     .sort((a, b) => b.count - a.count)
     .slice(0, limit);

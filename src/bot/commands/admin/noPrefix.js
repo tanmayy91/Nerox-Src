@@ -70,7 +70,7 @@ export default class NoPrefix extends Command {
         const noPrefixUsers = users
           .filter((user) => user)
           .map(
-            (user, index) => `${index + 1} **${user?.tag}** \`[${user?.id}]\``,
+            (user, index) => `${index + 1} **${user?.username}** \`[${user?.id}]\``,
           );
         const chunked = _.chunk(noPrefixUsers, 10);
         const embeds = [];
@@ -118,7 +118,7 @@ export default class NoPrefix extends Command {
                 client
                   .embed()
                   .desc(
-                    `${client.emoji.check} Successfully added no prefix privilages to \`${target.tag}\`.`,
+                    `${client.emoji.check} Successfully added no prefix privilages to \`${target.username}\`.`,
                   ),
               ],
             });
@@ -146,7 +146,7 @@ export default class NoPrefix extends Command {
                 client
                   .embed()
                   .desc(
-                    `${client.emoji.check} Successfully removed no prefix privilages from \`${target.tag}\`.`,
+                    `${client.emoji.check} Successfully removed no prefix privilages from \`${target.username}\`.`,
                   ),
               ],
             });

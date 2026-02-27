@@ -10,7 +10,7 @@ export default class InfoRequested {
             .desc(
               `${client.emoji.info} \`${command.name}\`\n\n` +
                 `${command.description}\n` +
-                `Aliases: \`${command.aliases.join(", ") || "None"}\`\n` +
+                `Aliases: \`${(command.aliases || []).join(", ") || "None"}\`\n` +
                 `Usage: \`${client.prefix}${command.name} ${command.usage}\``,
             ),
         ],

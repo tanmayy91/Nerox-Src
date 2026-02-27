@@ -63,7 +63,7 @@ export default class Ignore extends Command {
       return paginator(ctx, [embeds]);
     }
 
-    const targetChannel = ctx.mentions.channels.first() || ctx.channel;
+    const targetChannel = ctx.mentions?.channels?.first() || ctx.channel;
     const isIgnored = await client.db.ignore.has(targetChannel.id);
 
     if (args[0].toLowerCase() === "add") {

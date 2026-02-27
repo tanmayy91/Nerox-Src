@@ -146,7 +146,7 @@ export function startApiServer(client) {
     if (!ALLOWED_COLLECTIONS.includes(name)) {
       return res.status(404).json({ error: `Collection "${name}" not found.` });
     }
-    const { value } = req.body;
+    const { value } = req.body ?? {};
     if (value === undefined) {
       return res.status(400).json({ error: 'Request body must contain a "value" field.' });
     }
@@ -303,7 +303,7 @@ export function startApiServer(client) {
           name: g.name,
           memberCount: g.memberCount,
           ownerId: g.ownerId,
-          icon: g.iconURL({ dynamic: true }) ?? null,
+          icon: g.iconURL({ forceStatic: false }) ?? null,
           joinedAt: g.joinedAt,
         }));
       res.json({ count: guilds.length, guilds });
