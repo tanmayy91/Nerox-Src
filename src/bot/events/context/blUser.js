@@ -33,7 +33,7 @@ export default class BlacklistUser {
             .embed()
             .desc(
               `${client.emoji.bl} Blacklisted\n\n` +
-                `${client.emoji.info} User: ${ctx.author.tag}\n` +
+                `${client.emoji.info} User: ${ctx.author.username}\n` +
                 `${client.emoji.info} Guild: ${ctx.guild.name.substring(0, 20)}\n` +
                 `${client.emoji.info} Channel: ${ctx.channel.name}`,
             ),

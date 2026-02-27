@@ -1,4 +1,3 @@
-import moment from "moment-timezone";
 import { ActionRowBuilder } from "discord.js";
 const event = "guildDelete";
 export default class GuildDelete {

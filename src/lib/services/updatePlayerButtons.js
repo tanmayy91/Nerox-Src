@@ -1,6 +1,7 @@
 import { ActionRowBuilder } from "discord.js";
 export const updatePlayerButtons = async (client, player) => {
   const playEmbed = player.data.get("playEmbed");
+  if (!playEmbed) return;
   await playEmbed.edit({
     components: [
       new ActionRowBuilder().addComponents([

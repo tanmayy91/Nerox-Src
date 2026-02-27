@@ -48,13 +48,13 @@ export default class Stats extends Command {
           `Active Players: **${activePlayers}**`,
       )
       .footer({
-        text: `Page 1/3 | Requested by ${ctx.author.tag}`,
+        text: `Page 1/3 | Requested by ${ctx.author.username}`,
         iconURL: ctx.author.displayAvatarURL(),
       })
       .setTimestamp();
 
     const shardInfo = await client.cluster.broadcastEval((c) => ({
-      id: c.ws.shards.first().id,
+      id: c.ws.shards.first()?.id ?? 0,
       ping: c.ws.ping,
       guilds: c.guilds.cache.size,
       status: c.ws.status,

@@ -39,7 +39,7 @@ export default class NowPlaying extends Command {
                 `${track.author}\n\n` +
                 `${progressBar}\n` +
                 `\`${client.formatDuration(position)}\` / \`${track.isStream ? "LIVE" : client.formatDuration(duration)}\`\n\n` +
-                `Requested by ${track.requester.displayName}`,
+                `Requested by ${track.requester?.displayName ?? "Unknown"}`,
             ),
         ],
       });

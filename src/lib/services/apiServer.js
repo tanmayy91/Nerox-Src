@@ -112,7 +112,7 @@ export function startApiServer(client) {
     try {
       const col = resolveCollection(client.db, name);
       if (!col) return res.status(404).json({ error: `Collection "${name}" not found.` });
-      const data = await col.all();
+      const data = await col.get(col.all);
       res.json({ collection: name, data });
     } catch (err) {
       log(`API error on GET /api/db/${name}: ${err.message}`, "error");
@@ -146,7 +146,7 @@ export function startApiServer(client) {
     if (!ALLOWED_COLLECTIONS.includes(name)) {
       return res.status(404).json({ error: `Collection "${name}" not found.` });
     }
-    const { value } = req.body;
+    const { value } = req.body ?? {};
     if (value === undefined) {
       return res.status(400).json({ error: 'Request body must contain a "value" field.' });
     }
@@ -303,7 +303,7 @@ export function startApiServer(client) {
           name: g.name,
           memberCount: g.memberCount,
           ownerId: g.ownerId,
-          icon: g.iconURL({ dynamic: true }) ?? null,
+          icon: g.iconURL({ forceStatic: false }) ?? null,
           joinedAt: g.joinedAt,
         }));
       res.json({ count: guilds.length, guilds });
@@ -320,15 +320,14 @@ export function startApiServer(client) {
   app.get("/api/kpi/stats", auth, async (_req, res) => {
     try {
       const [songsPlayed, commandsUsed] = await Promise.all([
-        client.db.stats.songsPlayed.all(),
-        client.db.stats.commandsUsed.all(),
+        client.db.stats.songsPlayed.get(client.db.stats.songsPlayed.all),
+        client.db.stats.commandsUsed.get(client.db.stats.commandsUsed.all),
       ]);
 
-      const sumValues = (entries) =>
-        (entries ?? []).reduce((acc, e) => acc + (Number(e.data) || 0), 0);
+      const sumValues = (obj) =>
+        Object.values(obj ?? {}).reduce((acc, v) => acc + (Number(v) || 0), 0);
 
-      const toObject = (entries) =>
-        Object.fromEntries((entries ?? []).map((e) => [e.ID, e.data]));
+      const toObject = (obj) => obj ?? {};
 
       res.json({
         totalSongsPlayed: sumValues(songsPlayed),

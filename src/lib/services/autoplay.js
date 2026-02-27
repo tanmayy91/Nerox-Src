@@ -34,10 +34,12 @@ export const autoplay = async (client, player) => {
   }
   const track =
     result.tracks[
-      Math.floor(
-        Math.random() * (Math.min(result.tracks.length - 1, 5) + 1) + 1,
-      )
+      Math.floor(Math.random() * Math.min(result.tracks.length, 5))
     ];
+  if (!track) {
+    await player.destroy();
+    return;
+  }
   player?.queue.add(track);
   await player?.play();
 };

@@ -71,7 +71,7 @@ export default class ModManage extends Command {
         const modUsers = users
           .filter((user) => user)
           .map(
-            (user, index) => `${index + 1} **${user?.tag}** \`[${user?.id}]\``,
+            (user, index) => `${index + 1} **${user?.username}** \`[${user?.id}]\``,
           );
         const chunked = _.chunk(modUsers, 10);
         const embeds = chunked.map((chunk) =>
@@ -119,7 +119,7 @@ export default class ModManage extends Command {
               client
                 .embed()
                 .desc(
-                  `${client.emoji.check} Successfully added \`${target.tag}\` as a bot moderator.`,
+                  `${client.emoji.check} Successfully added \`${target.username}\` as a bot moderator.`,
                 ),
             ],
           });
@@ -141,7 +141,7 @@ export default class ModManage extends Command {
               client
                 .embed()
                 .desc(
-                  `${client.emoji.check} Successfully removed \`${target.tag}\` from bot moderators.`,
+                  `${client.emoji.check} Successfully removed \`${target.username}\` from bot moderators.`,
                 ),
             ],
           });

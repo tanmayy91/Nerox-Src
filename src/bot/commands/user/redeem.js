@@ -60,7 +60,7 @@ export default class Redeem extends Command {
 
       const generatorTag = await client.users
         .fetch(data.generatedBy)
-        .then((u) => `${u.tag} (${u.id})`)
+        .then((u) => `${u.username} (${u.id})`)
         .catch(() => `Unknown (${data.generatedBy})`);
 
       if (data.type === "user") {
@@ -96,7 +96,7 @@ export default class Redeem extends Command {
                 `${client.emoji.check} Premium activated successfully!\n\n` +
                   `${client.emoji.info1} **Type**: User\n` +
                   `${client.emoji.info1} **Duration**: \`${data.duration} day(s)\`\n` +
-                  `${client.emoji.info1} **Activated by**: ${ctx.author.tag} (${ctx.author.id})\n` +
+                  `${client.emoji.info1} **Activated by**: ${ctx.author.username} (${ctx.author.id})\n` +
                   `${client.emoji.info1} **Code Generator**: ${generatorTag}`,
               ),
           ],
@@ -138,7 +138,7 @@ export default class Redeem extends Command {
                 `${client.emoji.check} Premium activated successfully!\n\n` +
                   `${client.emoji.info1} **Type**: Guild\n` +
                   `${client.emoji.info1} **Duration**: \`${data.duration} day(s)\`\n` +
-                  `${client.emoji.info1} **Activated by**: ${ctx.author.tag} (${ctx.author.id})\n` +
+                  `${client.emoji.info1} **Activated by**: ${ctx.author.username} (${ctx.author.id})\n` +
                   `${client.emoji.info1} **Code Generator**: ${generatorTag}`,
               ),
           ],

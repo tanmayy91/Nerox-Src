@@ -116,7 +116,7 @@ export default class PremiumServer extends Command {
         }
 
         const data = {
-          addedBy: ctx.user.id,
+          addedBy: ctx.author.id,
           addedAt: now,
           ...(durationMs ? { expires: now + durationMs } : {}),
         };
@@ -129,7 +129,7 @@ export default class PremiumServer extends Command {
               .embed()
               .title(`${prem} Premium Activated`)
               .desc(
-                `${check} Server \`${serverId}\` is now premium!\n\n${info1} **Activated By:** <@${ctx.user.id}>\n${info} **Expires:** ${durationMs ? `<t:${Math.floor((now + durationMs) / 1000)}:R>` : "`Never`"}`,
+                `${check} Server \`${serverId}\` is now premium!\n\n${info1} **Activated By:** <@${ctx.author.id}>\n${info} **Expires:** ${durationMs ? `<t:${Math.floor((now + durationMs) / 1000)}:R>` : "`Never`"}`,
               ),
           ],
         });

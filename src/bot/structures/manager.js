@@ -53,13 +53,15 @@ const sortedNodes = lavaConfig.nodes.sort(
   (a, b) => (a.priority || 1) - (b.priority || 1),
 );
 
-// Convert nodes to Shoukaku format
-const lavalinkNodes = sortedNodes.map((node) => ({
-  name: node.name,
-  url: `${node.host}:${node.port}`,
-  auth: node.password,
-  secure: node.secure || false,
-}));
+// Convert nodes to Shoukaku format, skipping nodes with empty hosts
+const lavalinkNodes = sortedNodes
+  .filter((node) => node.host && node.host.trim() !== '')
+  .map((node) => ({
+    name: node.name,
+    url: `${node.host}:${node.port}`,
+    auth: node.password,
+    secure: node.secure || false,
+  }));
 
 export class Manager {
   static {
