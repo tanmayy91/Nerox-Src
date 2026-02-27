@@ -307,7 +307,7 @@ export function startApiServer(client) {
     res.json(
       successResponse({
         name: "Nerox Bot API",
-        version: "2.0.0",
+        version: "2.1.0",
         authentication: {
           method: "API Key",
           header: "x-api-key (recommended)",
@@ -315,6 +315,7 @@ export function startApiServer(client) {
         },
         endpoints: {
           health: "GET /api/health",
+          bot: "GET /api/bot",
           database: {
             list: "GET /api/db",
             getAll: "GET /api/db/:collection",
@@ -324,6 +325,21 @@ export function startApiServer(client) {
             exists: "GET /api/db/:collection/:key/exists",
             set: "POST /api/db/:collection/:key",
             delete: "DELETE /api/db/:collection/:key",
+          },
+          user: {
+            getUser: "GET /api/user/:userId (includes mutual servers)",
+          },
+          guild: {
+            getGuild: "GET /api/guild/:guildId",
+            getMember: "GET /api/guild/:guildId/member/:userId",
+            getChannels: "GET /api/guild/:guildId/channels",
+            getRoles: "GET /api/guild/:guildId/roles",
+          },
+          voice: {
+            getConnections: "GET /api/voice",
+          },
+          lavalink: {
+            getNodes: "GET /api/lavalink",
           },
           kpi: {
             overview: "GET /api/kpi/overview",
@@ -1024,6 +1040,510 @@ export function startApiServer(client) {
     } catch (err) {
       log(`API error on GET /api/kpi/commands: ${err.message}`, "error");
       res.status(500).json(errorResponse("Server Error", "Failed to fetch command data."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // USER & GUILD INFO ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/user/:userId
+   * Get information about a specific user including their mutual servers with the bot.
+   */
+  app.get("/api/user/:userId", auth, async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      if (!userId || !/^\d{17,19}$/.test(userId)) {
+        return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+      }
+
+      // Try to fetch the user
+      let user;
+      try {
+        user = await client.users.fetch(userId);
+      } catch {
+        return res.status(404).json(errorResponse("Not Found", "User not found."));
+      }
+
+      // Find mutual servers (servers where both the bot and user are present)
+      const mutualGuilds = [];
+      for (const [guildId, guild] of client.guilds.cache) {
+        try {
+          const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+          if (member) {
+            mutualGuilds.push({
+              id: guildId,
+              name: guild.name,
+              icon: guild.iconURL({ forceStatic: false }) ?? null,
+              memberCount: guild.memberCount,
+              ownerId: guild.ownerId,
+              isOwner: guild.ownerId === userId,
+              joinedAt: member.joinedAt,
+              roles: member.roles.cache
+                .filter((r) => r.id !== guild.id)
+                .map((r) => ({ id: r.id, name: r.name, color: r.hexColor })),
+              nickname: member.nickname,
+              permissions: member.permissions.toArray(),
+            });
+          }
+        } catch {
+          // Skip guilds where we can't fetch the member
+        }
+      }
+
+      res.json(
+        successResponse({
+          user: {
+            id: user.id,
+            username: user.username,
+            displayName: user.displayName,
+            discriminator: user.discriminator,
+            avatar: user.displayAvatarURL({ forceStatic: false }),
+            banner: user.bannerURL({ forceStatic: false }) ?? null,
+            accentColor: user.accentColor ?? null,
+            bot: user.bot,
+            system: user.system,
+            createdAt: user.createdAt,
+          },
+          mutualGuilds: {
+            count: mutualGuilds.length,
+            guilds: mutualGuilds,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/user/${req.params.userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch user data."));
+    }
+  });
+
+  /**
+   * GET /api/guild/:guildId
+   * Get detailed information about a specific guild.
+   */
+  app.get("/api/guild/:guildId", auth, async (req, res) => {
+    try {
+      const { guildId } = req.params;
+
+      if (!guildId || !/^\d{17,19}$/.test(guildId)) {
+        return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+      }
+
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        return res.status(404).json(errorResponse("Not Found", "Guild not found or bot is not a member."));
+      }
+
+      // Get owner info
+      let owner;
+      try {
+        owner = await guild.fetchOwner();
+      } catch {
+        owner = null;
+      }
+
+      // Get channel counts by type
+      const channels = {
+        text: guild.channels.cache.filter((c) => c.type === 0).size,
+        voice: guild.channels.cache.filter((c) => c.type === 2).size,
+        category: guild.channels.cache.filter((c) => c.type === 4).size,
+        announcement: guild.channels.cache.filter((c) => c.type === 5).size,
+        stage: guild.channels.cache.filter((c) => c.type === 13).size,
+        forum: guild.channels.cache.filter((c) => c.type === 15).size,
+        total: guild.channels.cache.size,
+      };
+
+      // Get role info
+      const roles = guild.roles.cache
+        .filter((r) => r.id !== guild.id)
+        .sort((a, b) => b.position - a.position)
+        .map((r) => ({
+          id: r.id,
+          name: r.name,
+          color: r.hexColor,
+          position: r.position,
+          members: r.members.size,
+          mentionable: r.mentionable,
+          hoist: r.hoist,
+        }));
+
+      // Get emoji info
+      const emojis = {
+        static: guild.emojis.cache.filter((e) => !e.animated).size,
+        animated: guild.emojis.cache.filter((e) => e.animated).size,
+        total: guild.emojis.cache.size,
+      };
+
+      res.json(
+        successResponse({
+          id: guild.id,
+          name: guild.name,
+          description: guild.description,
+          icon: guild.iconURL({ forceStatic: false }) ?? null,
+          banner: guild.bannerURL({ forceStatic: false }) ?? null,
+          splash: guild.splashURL({ forceStatic: false }) ?? null,
+          owner: owner
+            ? {
+                id: owner.id,
+                username: owner.user.username,
+                displayName: owner.displayName,
+                avatar: owner.displayAvatarURL({ forceStatic: false }),
+              }
+            : { id: guild.ownerId },
+          memberCount: guild.memberCount,
+          premiumTier: guild.premiumTier,
+          premiumSubscriptionCount: guild.premiumSubscriptionCount,
+          verificationLevel: guild.verificationLevel,
+          explicitContentFilter: guild.explicitContentFilter,
+          features: guild.features,
+          channels,
+          roles: {
+            count: roles.length,
+            list: roles.slice(0, 50), // Limit to top 50 roles
+          },
+          emojis,
+          createdAt: guild.createdAt,
+          joinedAt: guild.joinedAt,
+          vanityURLCode: guild.vanityURLCode,
+          afkChannelId: guild.afkChannelId,
+          afkTimeout: guild.afkTimeout,
+          systemChannelId: guild.systemChannelId,
+          rulesChannelId: guild.rulesChannelId,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/guild/${req.params.guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch guild data."));
+    }
+  });
+
+  /**
+   * GET /api/guild/:guildId/member/:userId
+   * Get detailed information about a member in a specific guild.
+   */
+  app.get("/api/guild/:guildId/member/:userId", auth, async (req, res) => {
+    try {
+      const { guildId, userId } = req.params;
+
+      if (!guildId || !/^\d{17,19}$/.test(guildId)) {
+        return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+      }
+      if (!userId || !/^\d{17,19}$/.test(userId)) {
+        return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+      }
+
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        return res.status(404).json(errorResponse("Not Found", "Guild not found."));
+      }
+
+      let member;
+      try {
+        member = guild.members.cache.get(userId) || await guild.members.fetch(userId);
+      } catch {
+        return res.status(404).json(errorResponse("Not Found", "Member not found in this guild."));
+      }
+
+      res.json(
+        successResponse({
+          user: {
+            id: member.user.id,
+            username: member.user.username,
+            displayName: member.user.displayName,
+            avatar: member.user.displayAvatarURL({ forceStatic: false }),
+            bot: member.user.bot,
+          },
+          member: {
+            nickname: member.nickname,
+            displayName: member.displayName,
+            avatar: member.displayAvatarURL({ forceStatic: false }),
+            joinedAt: member.joinedAt,
+            premiumSince: member.premiumSince,
+            communicationDisabledUntil: member.communicationDisabledUntil,
+            pending: member.pending,
+            roles: member.roles.cache
+              .filter((r) => r.id !== guild.id)
+              .sort((a, b) => b.position - a.position)
+              .map((r) => ({ id: r.id, name: r.name, color: r.hexColor })),
+            permissions: member.permissions.toArray(),
+            voice: member.voice.channelId
+              ? {
+                  channelId: member.voice.channelId,
+                  channelName: member.voice.channel?.name ?? null,
+                  deaf: member.voice.deaf,
+                  mute: member.voice.mute,
+                  selfDeaf: member.voice.selfDeaf,
+                  selfMute: member.voice.selfMute,
+                  streaming: member.voice.streaming,
+                  selfVideo: member.voice.selfVideo,
+                }
+              : null,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/guild/${req.params.guildId}/member/${req.params.userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch member data."));
+    }
+  });
+
+  /**
+   * GET /api/guild/:guildId/channels
+   * Get all channels in a specific guild.
+   */
+  app.get("/api/guild/:guildId/channels", auth, (req, res) => {
+    try {
+      const { guildId } = req.params;
+
+      if (!guildId || !/^\d{17,19}$/.test(guildId)) {
+        return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+      }
+
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        return res.status(404).json(errorResponse("Not Found", "Guild not found."));
+      }
+
+      const channels = guild.channels.cache
+        .sort((a, b) => a.position - b.position)
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          type: c.type,
+          position: c.position,
+          parentId: c.parentId,
+          parentName: c.parent?.name ?? null,
+          nsfw: c.nsfw ?? false,
+          topic: c.topic ?? null,
+          rateLimitPerUser: c.rateLimitPerUser ?? null,
+          bitrate: c.bitrate ?? null,
+          userLimit: c.userLimit ?? null,
+        }));
+
+      res.json(
+        successResponse({
+          guildId,
+          guildName: guild.name,
+          count: channels.length,
+          channels,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/guild/${req.params.guildId}/channels: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch channel data."));
+    }
+  });
+
+  /**
+   * GET /api/guild/:guildId/roles
+   * Get all roles in a specific guild.
+   */
+  app.get("/api/guild/:guildId/roles", auth, (req, res) => {
+    try {
+      const { guildId } = req.params;
+
+      if (!guildId || !/^\d{17,19}$/.test(guildId)) {
+        return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+      }
+
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        return res.status(404).json(errorResponse("Not Found", "Guild not found."));
+      }
+
+      const roles = guild.roles.cache
+        .filter((r) => r.id !== guild.id)
+        .sort((a, b) => b.position - a.position)
+        .map((r) => ({
+          id: r.id,
+          name: r.name,
+          color: r.hexColor,
+          position: r.position,
+          hoist: r.hoist,
+          mentionable: r.mentionable,
+          managed: r.managed,
+          permissions: r.permissions.toArray(),
+          members: r.members.size,
+          icon: r.iconURL({ forceStatic: false }) ?? null,
+        }));
+
+      res.json(
+        successResponse({
+          guildId,
+          guildName: guild.name,
+          count: roles.length,
+          roles,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/guild/${req.params.guildId}/roles: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch role data."));
+    }
+  });
+
+  /**
+   * GET /api/bot
+   * Get bot information including stats and configuration.
+   */
+  app.get("/api/bot", auth, async (req, res) => {
+    try {
+      const totalUsers = client.guilds.cache.reduce((sum, g) => sum + g.memberCount, 0);
+
+      res.json(
+        successResponse({
+          user: {
+            id: client.user.id,
+            username: client.user.username,
+            displayName: client.user.displayName,
+            discriminator: client.user.discriminator,
+            avatar: client.user.displayAvatarURL({ forceStatic: false }),
+            banner: client.user.bannerURL?.({ forceStatic: false }) ?? null,
+            bot: client.user.bot,
+            verified: client.user.flags?.has("VerifiedBot") ?? false,
+            createdAt: client.user.createdAt,
+          },
+          stats: {
+            guilds: client.guilds.cache.size,
+            users: totalUsers,
+            channels: client.channels.cache.size,
+            emojis: client.emojis.cache.size,
+            commands: client.commands.size,
+            categories: client.categories.length,
+            activePlayers: client.manager?.players?.size ?? 0,
+          },
+          config: {
+            prefix: client.prefix,
+            underMaintenance: client.underMaintenance ?? false,
+          },
+          session: {
+            uptime: client.uptime ?? 0,
+            uptimeFormatted: formatUptime(client.uptime ?? 0),
+            wsPing: client.ws.ping,
+            shardCount: client.options.shardCount ?? 1,
+            ready: client.isReady(),
+          },
+          links: {
+            invite: client.invite.admin(),
+            inviteMinimal: client.invite.required(),
+            support: client.config?.links?.support ?? null,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/bot: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch bot data."));
+    }
+  });
+
+  /**
+   * GET /api/voice
+   * Get all voice connections/players info.
+   */
+  app.get("/api/voice", auth, (req, res) => {
+    try {
+      const voiceConnections = [];
+      const playerMap = client.manager?.players ?? new Map();
+
+      for (const [guildId, player] of playerMap) {
+        const guild = client.guilds.cache.get(guildId);
+        const voiceChannel = client.channels.cache.get(player.voiceId);
+        const textChannel = client.channels.cache.get(player.textId);
+
+        voiceConnections.push({
+          guildId,
+          guildName: guild?.name ?? null,
+          voiceChannel: voiceChannel
+            ? {
+                id: voiceChannel.id,
+                name: voiceChannel.name,
+                members: voiceChannel.members?.size ?? 0,
+              }
+            : null,
+          textChannel: textChannel
+            ? {
+                id: textChannel.id,
+                name: textChannel.name,
+              }
+            : null,
+          state: {
+            playing: player.playing,
+            paused: player.paused,
+            volume: player.volume,
+            loop: player.loop,
+            is247: player.data?.get("247") ?? false,
+            autoplay: player.data?.get("autoplayStatus") ?? false,
+          },
+          currentTrack: player.queue?.current
+            ? {
+                title: player.queue.current.title,
+                author: player.queue.current.author,
+                duration: player.queue.current.length,
+                uri: player.queue.current.uri,
+              }
+            : null,
+          queueLength: player.queue?.size ?? 0,
+        });
+      }
+
+      res.json(
+        successResponse({
+          count: voiceConnections.length,
+          connections: voiceConnections,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/voice: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch voice data."));
+    }
+  });
+
+  /**
+   * GET /api/lavalink
+   * Get Lavalink node status and statistics.
+   */
+  app.get("/api/lavalink", auth, (req, res) => {
+    try {
+      const nodes = [];
+      const nodeMap = client.manager?.shoukaku?.nodes ?? new Map();
+
+      for (const [name, node] of nodeMap) {
+        nodes.push({
+          name,
+          state: node.state,
+          stateDescription: ["Disconnected", "Connecting", "Connected", "Disconnecting"][node.state] ?? "Unknown",
+          stats: node.stats
+            ? {
+                players: node.stats.players,
+                playingPlayers: node.stats.playingPlayers,
+                uptime: node.stats.uptime,
+                memory: {
+                  free: node.stats.memory?.free ?? 0,
+                  used: node.stats.memory?.used ?? 0,
+                  allocated: node.stats.memory?.allocated ?? 0,
+                  reservable: node.stats.memory?.reservable ?? 0,
+                },
+                cpu: {
+                  cores: node.stats.cpu?.cores ?? 0,
+                  systemLoad: node.stats.cpu?.systemLoad ?? 0,
+                  lavalinkLoad: node.stats.cpu?.lavalinkLoad ?? 0,
+                },
+              }
+            : null,
+        });
+      }
+
+      res.json(
+        successResponse({
+          totalNodes: nodes.length,
+          connectedNodes: nodes.filter((n) => n.state === 2).length,
+          nodes,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/lavalink: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch Lavalink data."));
     }
   });
 

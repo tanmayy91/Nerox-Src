@@ -10,6 +10,18 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Default fallback nodes for when lava.json is empty or invalid
+const DEFAULT_NODES = [
+  {
+    name: "fallback-node",
+    host: "lavalink.jirayu.net",
+    port: 13592,
+    password: "youshallnotpass",
+    secure: false,
+    priority: 1,
+  },
+];
+
 // Load Lavalink configuration from lava.json
 let lavaConfig;
 try {
@@ -21,16 +33,7 @@ try {
     error.message,
   );
   lavaConfig = {
-    nodes: [
-      {
-        name: "primary-node",
-        host: "pnode1.danbot.host",
-        port: 1427,
-        password: "kaalahoon",
-        secure: false,
-        priority: 1,
-      },
-    ],
+    nodes: DEFAULT_NODES,
     defaultSearchEngine: "youtube",
     spotifyConfig: {
       clientId: "d62dc6e25a374aad8f035111f351ea85",
@@ -49,19 +52,30 @@ try {
 }
 
 // Sort nodes by priority (lower priority = higher preference)
-const sortedNodes = lavaConfig.nodes.sort(
+const sortedNodes = (lavaConfig.nodes || []).sort(
   (a, b) => (a.priority || 1) - (b.priority || 1),
 );
 
 // Convert nodes to Shoukaku format, skipping nodes with empty hosts
-const lavalinkNodes = sortedNodes
-  .filter((node) => node.host && node.host.trim() !== '')
+let lavalinkNodes = sortedNodes
+  .filter((node) => node.host && node.host.trim() !== "" && node.port)
   .map((node) => ({
     name: node.name,
     url: `${node.host}:${node.port}`,
-    auth: node.password,
+    auth: node.password || "",
     secure: node.secure || false,
   }));
+
+// If no valid nodes found, use default fallback nodes
+if (lavalinkNodes.length === 0) {
+  console.warn("No valid Lavalink nodes in lava.json, using fallback nodes");
+  lavalinkNodes = DEFAULT_NODES.map((node) => ({
+    name: node.name,
+    url: `${node.host}:${node.port}`,
+    auth: node.password || "",
+    secure: node.secure || false,
+  }));
+}
 
 export class Manager {
   static {
@@ -81,7 +95,14 @@ export class Manager {
         new Connectors.DiscordJS(client),
         lavalinkNodes,
         {
-          userAgent: `@painfuego/fuego/v1.0.0/21_N-2K021-ST`,
+          userAgent: `Nerox/v1.0.0`,
+          reconnectTries: 10,
+          reconnectInterval: 5000,
+          restTimeout: 60000,
+          moveOnDisconnect: true,
+          resume: true,
+          resumeTimeout: 30,
+          resumeByLibrary: true,
         },
       );
 
@@ -96,21 +117,17 @@ export class Manager {
 
       // Enhanced Lavalink node connection handling with fallback
       manager.shoukaku.on("error", (name, error) => {
-        client.log(
-          `Lavalink node ${name} error: ${JSON.stringify(error)}`,
-          "error",
-        );
+        const errorMsg = error?.message || JSON.stringify(error) || "Unknown error";
+        client.log(`Lavalink node ${name} error: ${errorMsg}`, "error");
       });
 
       manager.shoukaku.on("ready", (name) => {
-        client.log(
-          `✅ Lavalink node: ${name} connected successfully`,
-          "success",
-        );
+        client.log(`Lavalink node: ${name} connected successfully`, "success");
       });
 
       manager.shoukaku.on("disconnect", (name, reason) => {
-        client.log(`⚠️ Lavalink node ${name} disconnected: ${reason}`, "warn");
+        const reasonStr = typeof reason === "object" ? JSON.stringify(reason) : reason;
+        client.log(`Lavalink node ${name} disconnected: ${reasonStr}`, "warn");
 
         // Check if there are other available nodes
         const availableNodes = [...manager.shoukaku.nodes.values()].filter(
@@ -118,18 +135,25 @@ export class Manager {
         );
         if (availableNodes.length > 0) {
           client.log(
-            `🔄 Switching to backup node: ${availableNodes[0].name}`,
+            `Switching to backup node: ${availableNodes[0].name}`,
             "info",
           );
         } else {
-          client.log("❌ All Lavalink nodes are disconnected!", "error");
+          client.log("All Lavalink nodes are disconnected!", "error");
         }
       });
 
       manager.shoukaku.on("reconnecting", (name, tries, delay) => {
         client.log(
-          `🔄 Reconnecting to ${name} (attempt ${tries}, delay ${delay}ms)`,
+          `Reconnecting to ${name} (attempt ${tries}, delay ${delay}ms)`,
           "info",
+        );
+      });
+
+      manager.shoukaku.on("close", (name, code, reason) => {
+        client.log(
+          `Lavalink node ${name} connection closed (code: ${code}, reason: ${reason || "none"})`,
+          "warn",
         );
       });
 
