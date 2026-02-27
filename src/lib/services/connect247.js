@@ -3,6 +3,7 @@ export const connect247 = async (client, guildId) => {
   const guild = client.guilds.cache.get(guildId);
   if (!guild) return (await client.db.twoFourSeven.delete(guildId), false);
   const data = await client.db.twoFourSeven.get(guild.id);
+  if (!data) return (await client.db.twoFourSeven.delete(guild.id), false);
   const textChannel = guild.channels.cache.get(data.textId);
   const voiceChannel = guild.channels.cache.get(data.voiceId);
   if (!(textChannel?.isTextBased() && voiceChannel?.isVoiceBased()))
