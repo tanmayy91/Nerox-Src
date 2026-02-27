@@ -1,16 +1,5 @@
 import moment from "moment";
-
-/**
- * Helper function to get all entries from a Josh collection.
- * Josh doesn't have an entries() method, so we use filter(() => true).
- * Returns an object like { key1: value1, key2: value2 }.
- * @param {object} col - The Josh collection instance.
- * @returns {Promise<object>} - An object containing all key-value pairs.
- */
-async function getAllEntries(col) {
-  const entries = await col.filter(() => true);
-  return Object.fromEntries(entries);
-}
+import { getAllEntries } from "./dbUtils.js";
 
 /**
  * Add a message to the user's count.
