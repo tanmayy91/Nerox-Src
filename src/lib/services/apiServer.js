@@ -274,6 +274,31 @@ function errorResponse(error, message) {
  *   GET /api/kpi/premium               → Premium users and servers
  *   GET /api/kpi/commands              → Command statistics
  *
+ * Bot:
+ *   GET /api/bot/info                  → Bot information (username, avatar, etc.)
+ *   GET /api/bot/maintenance           → Get maintenance mode status
+ *   POST /api/bot/maintenance          → Toggle maintenance mode
+ *
+ * Lavalink:
+ *   GET /api/lavalink/nodes            → Lavalink nodes status
+ *
+ * Users:
+ *   GET /api/users/:userId             → Look up user by ID
+ *
+ * Guilds:
+ *   GET /api/guilds/:guildId           → Look up guild by ID
+ *
+ * Blacklist:
+ *   GET /api/blacklist                 → Get all blacklisted users
+ *   POST /api/blacklist/:userId        → Add user to blacklist
+ *   DELETE /api/blacklist/:userId      → Remove user from blacklist
+ *
+ * Ignore:
+ *   GET /api/ignore                    → Get all ignored channels/guilds
+ *
+ * Bypass:
+ *   GET /api/bypass                    → Get all users with bypass permissions
+ *
  * @param {import("../../bot/structures/client.js").ExtendedClient} client
  */
 export function startApiServer(client) {
@@ -307,7 +332,7 @@ export function startApiServer(client) {
     res.json(
       successResponse({
         name: "Nerox Bot API",
-        version: "2.0.0",
+        version: "3.0.0",
         authentication: {
           method: "API Key",
           header: "x-api-key (recommended)",
@@ -334,6 +359,31 @@ export function startApiServer(client) {
             stats: "GET /api/kpi/stats",
             premium: "GET /api/kpi/premium",
             commands: "GET /api/kpi/commands",
+          },
+          bot: {
+            info: "GET /api/bot/info",
+            getMaintenance: "GET /api/bot/maintenance",
+            setMaintenance: "POST /api/bot/maintenance",
+          },
+          lavalink: {
+            nodes: "GET /api/lavalink/nodes",
+          },
+          users: {
+            lookup: "GET /api/users/:userId",
+          },
+          guilds: {
+            lookup: "GET /api/guilds/:guildId",
+          },
+          blacklist: {
+            list: "GET /api/blacklist",
+            add: "POST /api/blacklist/:userId",
+            remove: "DELETE /api/blacklist/:userId",
+          },
+          ignore: {
+            list: "GET /api/ignore",
+          },
+          bypass: {
+            list: "GET /api/bypass",
           },
         },
       }),
@@ -1024,6 +1074,418 @@ export function startApiServer(client) {
     } catch (err) {
       log(`API error on GET /api/kpi/commands: ${err.message}`, "error");
       res.status(500).json(errorResponse("Server Error", "Failed to fetch command data."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // BOT INFO ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/bot/info
+   * Bot information (username, avatar, id, etc.)
+   */
+  app.get("/api/bot/info", auth, (_req, res) => {
+    try {
+      const user = client.user;
+      res.json(
+        successResponse({
+          id: user.id,
+          username: user.username,
+          discriminator: user.discriminator,
+          tag: user.tag,
+          avatar: user.displayAvatarURL({ forceStatic: false, size: 1024 }),
+          banner: user.bannerURL({ forceStatic: false, size: 1024 }),
+          createdAt: user.createdAt,
+          createdTimestamp: user.createdTimestamp,
+          verified: user.verified,
+          bot: user.bot,
+          presence: {
+            status: client.presence?.status || "online",
+            activities: client.presence?.activities?.map((a) => ({
+              name: a.name,
+              type: a.type,
+              state: a.state,
+            })) || [],
+          },
+          inviteLinks: {
+            admin: client.invite.admin(),
+            required: client.invite.required(),
+          },
+          supportServer: client.config.links?.support || null,
+          prefix: client.prefix,
+          owners: client.owners || [],
+          admins: client.admins || [],
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/bot/info: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch bot info."));
+    }
+  });
+
+  /**
+   * GET /api/bot/maintenance
+   * Get maintenance mode status.
+   */
+  app.get("/api/bot/maintenance", auth, (_req, res) => {
+    res.json(
+      successResponse({
+        underMaintenance: client.underMaintenance ?? false,
+      }),
+    );
+  });
+
+  /**
+   * POST /api/bot/maintenance
+   * Toggle maintenance mode.
+   */
+  app.post("/api/bot/maintenance", auth, (req, res) => {
+    const { enabled } = req.body ?? {};
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json(errorResponse("Bad Request", 'Request body must contain a boolean "enabled" field.'));
+    }
+    client.underMaintenance = enabled;
+    res.json(
+      successResponse({
+        underMaintenance: client.underMaintenance,
+        message: enabled ? "Maintenance mode enabled." : "Maintenance mode disabled.",
+      }),
+    );
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // LAVALINK ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/lavalink/nodes
+   * Get status of all Lavalink nodes.
+   */
+  app.get("/api/lavalink/nodes", auth, (_req, res) => {
+    try {
+      const nodes = [];
+      const nodeMap = client.manager?.shoukaku?.nodes ?? new Map();
+
+      for (const [name, node] of nodeMap) {
+        const stateNames = { 0: "CONNECTING", 1: "CONNECTED", 2: "READY", 3: "DISCONNECTING", 4: "DISCONNECTED" };
+        nodes.push({
+          name,
+          state: node.state,
+          stateLabel: stateNames[node.state] || "UNKNOWN",
+          stats: node.stats ? {
+            players: node.stats.players,
+            playingPlayers: node.stats.playingPlayers,
+            uptime: node.stats.uptime,
+            cpu: {
+              cores: node.stats.cpu?.cores,
+              systemLoad: node.stats.cpu?.systemLoad,
+              lavalinkLoad: node.stats.cpu?.lavalinkLoad,
+            },
+            memory: {
+              used: node.stats.memory?.used,
+              free: node.stats.memory?.free,
+              allocated: node.stats.memory?.allocated,
+              reservable: node.stats.memory?.reservable,
+            },
+          } : null,
+        });
+      }
+
+      const readyNodes = nodes.filter((n) => n.state === 2).length;
+
+      res.json(
+        successResponse({
+          totalNodes: nodes.length,
+          readyNodes,
+          disconnectedNodes: nodes.length - readyNodes,
+          nodes,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/lavalink/nodes: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch lavalink nodes."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // USER & GUILD LOOKUP ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/users/:userId
+   * Look up a Discord user by ID.
+   */
+  app.get("/api/users/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const user = await client.users.fetch(userId).catch(() => null);
+      if (!user) {
+        return res.status(404).json(errorResponse("Not Found", `User ${userId} not found.`));
+      }
+
+      // Check user status in various databases
+      const [isBlacklisted, isNoPrefix, isPremium, isBotMod] = await Promise.all([
+        safeHas(client.db.blacklist, userId),
+        safeHas(client.db.noPrefix, userId),
+        safeHas(client.db.botstaff, userId),
+        safeHas(client.db.botmods, userId),
+      ]);
+
+      res.json(
+        successResponse({
+          id: user.id,
+          username: user.username,
+          discriminator: user.discriminator,
+          tag: user.tag,
+          avatar: user.displayAvatarURL({ forceStatic: false, size: 512 }),
+          banner: user.bannerURL({ forceStatic: false, size: 512 }),
+          createdAt: user.createdAt,
+          createdTimestamp: user.createdTimestamp,
+          bot: user.bot,
+          system: user.system,
+          status: {
+            isOwner: client.owners?.includes(userId) || false,
+            isAdmin: client.admins?.includes(userId) || false,
+            isBotMod,
+            isPremium,
+            isNoPrefix,
+            isBlacklisted,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/users/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch user."));
+    }
+  });
+
+  /**
+   * GET /api/guilds/:guildId
+   * Look up a specific guild by ID.
+   */
+  app.get("/api/guilds/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        return res.status(404).json(errorResponse("Not Found", `Guild ${guildId} not found or bot is not a member.`));
+      }
+
+      // Check guild status in various databases
+      const [is247, isIgnored, isPremium, hasCustomPrefix] = await Promise.all([
+        safeHas(client.db.twoFourSeven, guildId),
+        safeHas(client.db.ignore, guildId),
+        safeHas(client.db.serverstaff, guildId),
+        safeGet(client.db.prefix, guildId),
+      ]);
+
+      const player = client.manager?.players?.get(guildId);
+
+      res.json(
+        successResponse({
+          id: guild.id,
+          name: guild.name,
+          description: guild.description,
+          memberCount: guild.memberCount,
+          ownerId: guild.ownerId,
+          icon: guild.iconURL({ forceStatic: false, size: 512 }),
+          banner: guild.bannerURL({ forceStatic: false, size: 512 }),
+          splash: guild.splashURL({ forceStatic: false, size: 512 }),
+          joinedAt: guild.joinedAt,
+          createdAt: guild.createdAt,
+          premiumTier: guild.premiumTier,
+          premiumSubscriptionCount: guild.premiumSubscriptionCount,
+          vanityURLCode: guild.vanityURLCode,
+          verified: guild.verified,
+          partnered: guild.partnered,
+          channels: {
+            total: guild.channels.cache.size,
+            text: guild.channels.cache.filter((c) => c.isTextBased() && !c.isThread()).size,
+            voice: guild.channels.cache.filter((c) => c.isVoiceBased()).size,
+          },
+          roles: guild.roles.cache.size,
+          emojis: guild.emojis.cache.size,
+          status: {
+            isPremium,
+            is247,
+            isIgnored,
+            customPrefix: hasCustomPrefix || null,
+            hasActivePlayer: !!player,
+          },
+          player: player ? {
+            playing: player.playing,
+            paused: player.paused,
+            volume: player.volume,
+            queueSize: player.queue?.size ?? 0,
+            currentTrack: player.queue?.current?.title ?? null,
+          } : null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/guilds/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch guild."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // BLACKLIST MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/blacklist
+   * Get all blacklisted users.
+   */
+  app.get("/api/blacklist", auth, async (_req, res) => {
+    try {
+      const blacklist = await getAllEntries(client.db.blacklist);
+      const entries = await Promise.all(
+        Object.entries(blacklist).map(async ([id, data]) => {
+          const user = await client.users.fetch(id).catch(() => null);
+          return {
+            id,
+            username: user?.username ?? null,
+            tag: user?.tag ?? null,
+            reason: data?.reason ?? "No reason provided",
+            blacklistedAt: data?.at ?? null,
+            blacklistedBy: data?.by ?? null,
+          };
+        }),
+      );
+
+      res.json(
+        successResponse({
+          count: entries.length,
+          entries,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/blacklist: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch blacklist."));
+    }
+  });
+
+  /**
+   * POST /api/blacklist/:userId
+   * Add a user to the blacklist.
+   */
+  app.post("/api/blacklist/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+    const { reason } = req.body ?? {};
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    // Prevent blacklisting owners
+    if (client.owners?.includes(userId)) {
+      return res.status(403).json(errorResponse("Forbidden", "Cannot blacklist bot owners."));
+    }
+
+    try {
+      await client.db.blacklist.set(userId, {
+        reason: reason || "Blacklisted via API",
+        at: Date.now(),
+        by: "API",
+      });
+
+      res.json(
+        successResponse({
+          userId,
+          action: "blacklisted",
+          reason: reason || "Blacklisted via API",
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/blacklist/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to blacklist user."));
+    }
+  });
+
+  /**
+   * DELETE /api/blacklist/:userId
+   * Remove a user from the blacklist.
+   */
+  app.delete("/api/blacklist/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.blacklist, userId);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", `User ${userId} is not blacklisted.`));
+      }
+
+      await client.db.blacklist.delete(userId);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "unblacklisted",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/blacklist/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to unblacklist user."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // IGNORE (CHANNEL/GUILD) MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/ignore
+   * Get all ignored channels/guilds.
+   */
+  app.get("/api/ignore", auth, async (_req, res) => {
+    try {
+      const ignored = await getAllEntries(client.db.ignore);
+      res.json(
+        successResponse({
+          count: Object.keys(ignored).length,
+          entries: ignored,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/ignore: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch ignored list."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // BYPASS MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/bypass
+   * Get all users with bypass permissions.
+   */
+  app.get("/api/bypass", auth, async (_req, res) => {
+    try {
+      const bypassed = await getAllEntries(client.db.bypass);
+      res.json(
+        successResponse({
+          count: Object.keys(bypassed).length,
+          entries: bypassed,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/bypass: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch bypass list."));
     }
   });
 
