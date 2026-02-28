@@ -507,7 +507,15 @@ function advancedRateLimiter(endpointLimits = new Map()) {
   }, RATE_LIMIT_CLEANUP_BUFFER_MS);
 
   return (req, res, next) => {
-    const ip = req.ip || req.connection?.remoteAddress || "unknown";
+    const ip = req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress;
+    if (!ip) {
+      return res.status(400).json({
+        success: false,
+        error: "Bad Request",
+        message: "Unable to determine client IP for rate limiting.",
+        requestId: req.requestId,
+      });
+    }
     const endpoint = req.path;
     const now = Date.now();
 
@@ -5489,4 +5497,3 @@ export function startApiServer(client) {
     log(`API Version: ${API_VERSION}`, "info");
   });
 }
-
