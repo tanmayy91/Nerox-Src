@@ -31,6 +31,7 @@ const RATE_LIMIT_CLEANUP_BUFFER_MS = 60000;
 const CACHE_TTL_MS = 30000; // 30 seconds cache
 const MAX_AUDIT_LOG_SIZE = 500;
 const ACTIVITY_PER_LEVEL = 50; // Activity points needed per level
+const SAFE_URL_PARSE_BASE = "http://internal";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ADVANCED CACHING SYSTEM
@@ -711,10 +712,15 @@ function successResponse(data) {
  * Create an error response.
  * @param {string} error - Error type.
  * @param {string} message - Error message.
+ * @param {object} [data] - Optional additional data payload.
  * @returns {object} Formatted response.
  */
-function errorResponse(error, message) {
-  return { success: false, timestamp: new Date().toISOString(), error, message };
+function errorResponse(error, message, data) {
+  const response = { success: false, timestamp: new Date().toISOString(), error, message };
+  if (data !== undefined) {
+    response.data = data;
+  }
+  return response;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1101,13 +1107,22 @@ export function startApiServer(client) {
    * Readiness probe endpoint.
    */
   app.get("/api/health/ready", (_req, res) => {
-    const isReady = client.isReady() && !!client.db;
+    const botReady = client.isReady();
+    const databaseConnected = !!client.db;
+    const isReady = botReady && databaseConnected;
+    const payload = {
+      status: isReady ? "ready" : "not_ready",
+      botReady,
+      databaseConnected,
+    };
     res.status(isReady ? 200 : 503).json(
-      successResponse({
-        status: isReady ? "ready" : "not_ready",
-        botReady: client.isReady(),
-        databaseConnected: !!client.db,
-      }),
+      isReady
+        ? successResponse(payload)
+        : errorResponse(
+            "service_unavailable",
+            "Service not ready to serve traffic. Verify database connectivity and wait for the bot ready event.",
+            payload,
+          ),
     );
   });
 
@@ -5455,7 +5470,7 @@ export function startApiServer(client) {
     });
 
     for (const wsClient of wsClients) {
-      if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+      if (wsClient.readyState === WebSocket.OPEN) {
         wsClient.send(message);
       }
     }
@@ -5488,9 +5503,14 @@ export function startApiServer(client) {
     // Authenticate WebSocket connection
     let url;
     try {
-      url = new URL(req.url, "http://localhost");
+      // Use a fixed parse base to avoid trusting user-controlled Host headers.
+      url = new URL(req.url, SAFE_URL_PARSE_BASE);
     } catch {
-      ws.close(1002, "Invalid request URL");
+      ws.close(1002, "Invalid WebSocket URL format. Expected /api/ws?apiKey=<key>");
+      return;
+    }
+    if (url.pathname !== "/api/ws") {
+      ws.close(1008, "Invalid WebSocket path");
       return;
     }
     const providedKey = url.searchParams.get("apiKey") || req.headers["x-api-key"];
