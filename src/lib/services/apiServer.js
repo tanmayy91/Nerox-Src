@@ -2,7 +2,7 @@ import os from "os";
 import crypto from "crypto";
 import express from "express";
 import { createServer } from "http";
-import { WebSocketServer } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { log } from "../../logger.js";
 import {
   getAllEntries,
@@ -31,6 +31,7 @@ const RATE_LIMIT_CLEANUP_BUFFER_MS = 60000;
 const CACHE_TTL_MS = 30000; // 30 seconds cache
 const MAX_AUDIT_LOG_SIZE = 500;
 const ACTIVITY_PER_LEVEL = 50; // Activity points needed per level
+const SAFE_URL_PARSE_BASE = "http://internal";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ADVANCED CACHING SYSTEM
@@ -105,7 +106,8 @@ class APICache {
 const apiCache = new APICache();
 
 // Cleanup cache periodically
-setInterval(() => apiCache.cleanup(), CACHE_TTL_MS);
+const cacheCleanupInterval = setInterval(() => apiCache.cleanup(), CACHE_TTL_MS);
+cacheCleanupInterval.unref();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AUDIT LOGGING SYSTEM
@@ -281,6 +283,13 @@ function paginateResponse(items, limit, offset) {
  * @returns {object} Cloned object.
  */
 function deepClone(obj) {
+  if (typeof globalThis.structuredClone === "function") {
+    try {
+      return globalThis.structuredClone(obj);
+    } catch {
+      // Expected for values unsupported by structuredClone (e.g., functions)
+    }
+  }
   return JSON.parse(JSON.stringify(obj));
 }
 
@@ -497,7 +506,7 @@ function advancedRateLimiter(endpointLimits = new Map()) {
   const defaultLimit = { windowMs: 60000, maxRequests: 100 };
 
   // Cleanup old entries periodically
-  setInterval(() => {
+  const rateLimitCleanupInterval = setInterval(() => {
     const now = Date.now();
     for (const [key, record] of requests) {
       if (now > record.resetAt + RATE_LIMIT_CLEANUP_BUFFER_MS) {
@@ -505,9 +514,18 @@ function advancedRateLimiter(endpointLimits = new Map()) {
       }
     }
   }, RATE_LIMIT_CLEANUP_BUFFER_MS);
+  rateLimitCleanupInterval.unref();
 
   return (req, res, next) => {
-    const ip = req.ip || req.connection.remoteAddress;
+    const ip = req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress;
+    if (!ip) {
+      return res.status(400).json({
+        success: false,
+        error: "Bad Request",
+        message: "Unable to determine client IP for rate limiting.",
+        requestId: req.requestId,
+      });
+    }
     const endpoint = req.path;
     const now = Date.now();
 
@@ -694,10 +712,15 @@ function successResponse(data) {
  * Create an error response.
  * @param {string} error - Error type.
  * @param {string} message - Error message.
+ * @param {object} [data] - Optional additional data payload.
  * @returns {object} Formatted response.
  */
-function errorResponse(error, message) {
-  return { success: false, timestamp: new Date().toISOString(), error, message };
+function errorResponse(error, message, data) {
+  const response = { success: false, timestamp: new Date().toISOString(), error, message };
+  if (data !== undefined) {
+    response.data = data;
+  }
+  return response;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -714,6 +737,8 @@ function errorResponse(error, message) {
  * Health & Info:
  *   GET /api                           → API info and available endpoints
  *   GET /api/health                    → Health check
+ *   GET /api/health/live               → Liveness probe
+ *   GET /api/health/ready              → Readiness probe
  *
  * Database:
  *   GET /api/db                        → List available collections
@@ -867,6 +892,8 @@ export function startApiServer(client) {
           info: {
             root: "GET /api",
             health: "GET /api/health",
+            healthLive: "GET /api/health/live",
+            healthReady: "GET /api/health/ready",
             metrics: "GET /api/metrics",
             cache: "GET /api/cache",
             audit: "GET /api/audit",
@@ -1058,6 +1085,44 @@ export function startApiServer(client) {
           build: API_BUILD,
         },
       }),
+    );
+  });
+
+  /**
+   * GET /api/health/live
+   * Lightweight liveness probe endpoint.
+   */
+  app.get("/api/health/live", (_req, res) => {
+    res.json(
+      successResponse({
+        status: "alive",
+        service: "nerox-api",
+        version: API_VERSION,
+      }),
+    );
+  });
+
+  /**
+   * GET /api/health/ready
+   * Readiness probe endpoint.
+   */
+  app.get("/api/health/ready", (_req, res) => {
+    const botReady = client.isReady();
+    const databaseConnected = !!client.db;
+    const isReady = botReady && databaseConnected;
+    const payload = {
+      status: isReady ? "ready" : "not_ready",
+      botReady,
+      databaseConnected,
+    };
+    res.status(isReady ? 200 : 503).json(
+      isReady
+        ? successResponse(payload)
+        : errorResponse(
+            "service_unavailable",
+            "Service not ready to serve traffic. Verify database connectivity and wait for the bot ready event.",
+            payload,
+          ),
     );
   });
 
@@ -5405,7 +5470,7 @@ export function startApiServer(client) {
     });
 
     for (const wsClient of wsClients) {
-      if (wsClient.readyState === WebSocketServer.OPEN || wsClient.readyState === 1) {
+      if (wsClient.readyState === WebSocket.OPEN) {
         wsClient.send(message);
       }
     }
@@ -5436,7 +5501,18 @@ export function startApiServer(client) {
   // WebSocket connection handler
   wss.on("connection", (ws, req) => {
     // Authenticate WebSocket connection
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    let url;
+    try {
+      // Use a fixed parse base to avoid trusting user-controlled Host headers.
+      url = new URL(req.url, SAFE_URL_PARSE_BASE);
+    } catch {
+      ws.close(1002, "Invalid WebSocket URL format. Expected /api/ws?apiKey=<key>");
+      return;
+    }
+    if (url.pathname !== "/api/ws") {
+      ws.close(1008, "Invalid WebSocket path");
+      return;
+    }
     const providedKey = url.searchParams.get("apiKey") || req.headers["x-api-key"];
 
     if (!providedKey || providedKey !== apiKey) {
@@ -5487,6 +5563,7 @@ export function startApiServer(client) {
     log(`API endpoints available at http://localhost:${port}/api`, "info");
     log(`WebSocket endpoint available at ws://localhost:${port}/api/ws`, "info");
     log(`API Version: ${API_VERSION}`, "info");
+  }).on("error", (err) => {
+    log(`Failed to start REST API server on port ${port}: ${err.message}`, "error");
   });
 }
-
