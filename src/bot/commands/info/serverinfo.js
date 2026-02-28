@@ -14,7 +14,6 @@ export default class ServerInfo extends Command {
 
   async execute(client, ctx) {
     const guild = ctx.guild;
-    const me = guild?.members.me;
     if (!guild)
       return ctx.reply({
         content: "This command must be used in a server.",

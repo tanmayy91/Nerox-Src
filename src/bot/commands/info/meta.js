@@ -39,12 +39,10 @@ export default class CodeStats extends Command {
       const embeds = [client.embed().desc(info.join("\n"))];
 
       const treeChunks = _.chunk(stats.tree, 20);
-      let pageNum = 2;
       for (const chunk of treeChunks) {
         embeds.push(
           client.embed().desc(`\`\`\`bash\n${chunk.join("\n")}\n\`\`\``),
         );
-        pageNum++;
       }
 
       await paginator(ctx, embeds);

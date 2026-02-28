@@ -7,7 +7,7 @@ export default class SearchEngine extends Command {
     this.aliases = ["se", "engine", "searchprovider"];
     this.usage = "";
     this.description = "Set your preferred search engine (Premium Only)";
-    this.execute = async (client, ctx, args) => {
+    this.execute = async (client, ctx, _args) => {
       const { prem, check, cross, info } = client.emoji;
 
       // Check if user is premium
@@ -139,7 +139,7 @@ export default class SearchEngine extends Command {
               ],
               components: [],
             });
-          } catch (error) {
+          } catch {
             // Message might be deleted
           }
         }

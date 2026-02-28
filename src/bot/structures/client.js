@@ -16,7 +16,6 @@ import {
   Partials,
   Collection,
   GatewayIntentBits,
-  WebhookClient,
 } from "discord.js";
 import { ClusterClient, getInfo } from "discord-hybrid-sharding";
 import { config } from "./config.js"; // 🔥 Now loads config directly

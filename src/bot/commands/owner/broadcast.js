@@ -91,7 +91,7 @@ export default class Broadcast extends Command {
         ],
       });
 
-      for (const [guildId, guild] of guilds) {
+      for (const [_guildId, guild] of guilds) {
         try {
           const channel = guild.channels.cache.find(
             (ch) =>

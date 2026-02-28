@@ -119,7 +119,7 @@ export default class InteractionCreate {
           if (songs?.length) {
             await interaction.respond(songs);
           }
-        } catch (err) {
+        } catch {
           // Optionally log the error
         }
       }

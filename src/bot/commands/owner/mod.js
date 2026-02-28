@@ -58,7 +58,7 @@ export default class ModManage extends Command {
         const users = await Promise.all(
           keys.map(
             async (user) =>
-              await client.users.fetch(user).catch(async (err) => {
+              await client.users.fetch(user).catch(async (_err) => {
                 try {
                   await client.db.botmods.delete(user);
                 } catch (deleteErr) {

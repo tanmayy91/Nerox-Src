@@ -51,7 +51,7 @@ export default class Backup extends Command {
         "All systems green. Preparing for dispatch...",
       ];
 
-      for (const [index, step] of steps.entries()) {
+      for (const [index, _step] of steps.entries()) {
         await new Promise((r) => setTimeout(r, 2000)); // Small delay for suspense
         await waitEmbed.edit({
           embeds: [
