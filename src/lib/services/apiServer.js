@@ -1,5 +1,8 @@
 import os from "os";
+import crypto from "crypto";
 import express from "express";
+import { createServer } from "http";
+import { WebSocketServer } from "ws";
 import { log } from "../../logger.js";
 import {
   getAllEntries,
@@ -8,6 +11,14 @@ import {
   safeGet,
   safeHas,
 } from "../utils/dbUtils.js";
+
+// ══════════════════════════════════════════════════════════════════════════════
+// API VERSION
+// ══════════════════════════════════════════════════════════════════════════════
+
+const API_VERSION = "5.0.0";
+// API_PREFIX reserved for future versioned endpoints
+const _API_PREFIX = "/api/v1";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CONFIGURATION
@@ -166,12 +177,12 @@ function authenticate(apiKey) {
 }
 
 /**
- * Simple in-memory rate limiter.
+ * Simple in-memory rate limiter (legacy, use advancedRateLimiter instead).
  * @param {number} windowMs - Time window in milliseconds.
  * @param {number} maxRequests - Maximum requests per window.
  * @returns {Function} Express middleware function.
  */
-function rateLimiter(windowMs = 60000, maxRequests = 100) {
+function _rateLimiter(windowMs = 60000, maxRequests = 100) {
   const requests = new Map();
 
   return (req, res, next) => {
@@ -213,7 +224,287 @@ function errorHandler(err, req, res, _next) {
     success: false,
     error: "Internal Server Error",
     message: process.env.NODE_ENV === "development" ? err.message : "An unexpected error occurred.",
+    requestId: req.requestId,
   });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ADVANCED MIDDLEWARE
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Request ID middleware for tracking requests.
+ */
+function requestIdMiddleware(req, _res, next) {
+  req.requestId = crypto.randomUUID();
+  next();
+}
+
+/**
+ * Response headers middleware for adding standard headers.
+ */
+function responseHeaders(req, res, next) {
+  res.setHeader("X-Request-ID", req.requestId || "unknown");
+  res.setHeader("X-API-Version", API_VERSION);
+  res.setHeader("X-Powered-By", "Nerox Bot API");
+  next();
+}
+
+/**
+ * Advanced rate limiter with per-endpoint limits.
+ * @param {Map} endpointLimits - Map of endpoint patterns to limits.
+ * @returns {Function} Express middleware function.
+ */
+function advancedRateLimiter(endpointLimits = new Map()) {
+  const requests = new Map();
+  const defaultLimit = { windowMs: 60000, maxRequests: 100 };
+
+  // Cleanup old entries periodically
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of requests) {
+      if (now > record.resetAt + 60000) {
+        requests.delete(key);
+      }
+    }
+  }, 60000);
+
+  return (req, res, next) => {
+    const ip = req.ip || req.connection.remoteAddress;
+    const endpoint = req.path;
+    const now = Date.now();
+
+    // Find matching endpoint limit
+    let limit = defaultLimit;
+    for (const [pattern, config] of endpointLimits) {
+      if (endpoint.includes(pattern)) {
+        limit = config;
+        break;
+      }
+    }
+
+    const key = `${ip}:${endpoint}`;
+
+    if (!requests.has(key)) {
+      requests.set(key, { count: 1, resetAt: now + limit.windowMs });
+      res.setHeader("X-RateLimit-Limit", limit.maxRequests);
+      res.setHeader("X-RateLimit-Remaining", limit.maxRequests - 1);
+      res.setHeader("X-RateLimit-Reset", Math.ceil((now + limit.windowMs) / 1000));
+      return next();
+    }
+
+    const record = requests.get(key);
+    if (now > record.resetAt) {
+      record.count = 1;
+      record.resetAt = now + limit.windowMs;
+      res.setHeader("X-RateLimit-Limit", limit.maxRequests);
+      res.setHeader("X-RateLimit-Remaining", limit.maxRequests - 1);
+      res.setHeader("X-RateLimit-Reset", Math.ceil(record.resetAt / 1000));
+      return next();
+    }
+
+    res.setHeader("X-RateLimit-Limit", limit.maxRequests);
+    res.setHeader("X-RateLimit-Remaining", Math.max(0, limit.maxRequests - record.count));
+    res.setHeader("X-RateLimit-Reset", Math.ceil(record.resetAt / 1000));
+
+    if (record.count >= limit.maxRequests) {
+      return res.status(429).json({
+        success: false,
+        error: "Too Many Requests",
+        message: `Rate limit exceeded for this endpoint. Try again in ${Math.ceil((record.resetAt - now) / 1000)}s.`,
+        retryAfter: Math.ceil((record.resetAt - now) / 1000),
+        requestId: req.requestId,
+      });
+    }
+
+    record.count++;
+    next();
+  };
+}
+
+/**
+ * Request body validation middleware (available for future use).
+ * @param {object} schema - Validation schema { field: { type, required, min, max, enum } }
+ * @returns {Function} Express middleware function.
+ */
+function _validateBody(schema) {
+  return (req, res, next) => {
+    const body = req.body ?? {};
+    const errors = [];
+
+    for (const [field, rules] of Object.entries(schema)) {
+      const value = body[field];
+
+      // Check required
+      if (rules.required && (value === undefined || value === null)) {
+        errors.push(`Field "${field}" is required.`);
+        continue;
+      }
+
+      // Skip validation if not present and not required
+      if (value === undefined || value === null) continue;
+
+      // Type check
+      if (rules.type && typeof value !== rules.type) {
+        errors.push(`Field "${field}" must be of type ${rules.type}.`);
+        continue;
+      }
+
+      // Min/Max for numbers
+      if (rules.type === "number") {
+        if (rules.min !== undefined && value < rules.min) {
+          errors.push(`Field "${field}" must be at least ${rules.min}.`);
+        }
+        if (rules.max !== undefined && value > rules.max) {
+          errors.push(`Field "${field}" must be at most ${rules.max}.`);
+        }
+      }
+
+      // Min/Max length for strings
+      if (rules.type === "string") {
+        if (rules.minLength !== undefined && value.length < rules.minLength) {
+          errors.push(`Field "${field}" must be at least ${rules.minLength} characters.`);
+        }
+        if (rules.maxLength !== undefined && value.length > rules.maxLength) {
+          errors.push(`Field "${field}" must be at most ${rules.maxLength} characters.`);
+        }
+      }
+
+      // Enum validation
+      if (rules.enum && !rules.enum.includes(value)) {
+        errors.push(`Field "${field}" must be one of: ${rules.enum.join(", ")}.`);
+      }
+
+      // Pattern validation
+      if (rules.pattern && !rules.pattern.test(value)) {
+        errors.push(`Field "${field}" does not match required pattern.`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Validation Error",
+        message: errors.join(" "),
+        errors,
+        requestId: req.requestId,
+      });
+    }
+
+    next();
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// API METRICS TRACKING
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * In-memory API metrics storage.
+ */
+const apiMetrics = {
+  requests: {
+    total: 0,
+    byMethod: {},
+    byEndpoint: {},
+    byStatus: {},
+  },
+  latency: {
+    total: 0,
+    count: 0,
+    byEndpoint: {},
+  },
+  errors: [],
+  startTime: Date.now(),
+};
+
+/**
+ * Metrics tracking middleware.
+ */
+function metricsMiddleware(req, res, next) {
+  const start = Date.now();
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    const endpoint = req.route?.path || req.path;
+
+    // Count requests
+    apiMetrics.requests.total++;
+    apiMetrics.requests.byMethod[req.method] = (apiMetrics.requests.byMethod[req.method] || 0) + 1;
+    apiMetrics.requests.byEndpoint[endpoint] = (apiMetrics.requests.byEndpoint[endpoint] || 0) + 1;
+    apiMetrics.requests.byStatus[res.statusCode] = (apiMetrics.requests.byStatus[res.statusCode] || 0) + 1;
+
+    // Track latency
+    apiMetrics.latency.total += duration;
+    apiMetrics.latency.count++;
+    if (!apiMetrics.latency.byEndpoint[endpoint]) {
+      apiMetrics.latency.byEndpoint[endpoint] = { total: 0, count: 0 };
+    }
+    apiMetrics.latency.byEndpoint[endpoint].total += duration;
+    apiMetrics.latency.byEndpoint[endpoint].count++;
+
+    // Track errors
+    if (res.statusCode >= 400) {
+      apiMetrics.errors.push({
+        timestamp: Date.now(),
+        method: req.method,
+        endpoint,
+        status: res.statusCode,
+        requestId: req.requestId,
+      });
+      // Keep only last 100 errors
+      if (apiMetrics.errors.length > 100) {
+        apiMetrics.errors.shift();
+      }
+    }
+  });
+
+  next();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// WEBHOOK NOTIFICATIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * In-memory webhook subscriptions.
+ */
+const webhookSubscriptions = new Map();
+
+/**
+ * Send webhook notification.
+ * @param {string} event - Event type.
+ * @param {object} data - Event data.
+ */
+async function sendWebhookNotification(event, data) {
+  const subscriptions = webhookSubscriptions.get(event) || [];
+
+  for (const sub of subscriptions) {
+    try {
+      const payload = {
+        event,
+        timestamp: new Date().toISOString(),
+        data,
+      };
+
+      const signature = crypto
+        .createHmac("sha256", sub.secret || "default-secret")
+        .update(JSON.stringify(payload))
+        .digest("hex");
+
+      await fetch(sub.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Webhook-Signature": signature,
+          "X-Webhook-Event": event,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      log(`Webhook delivery failed for ${sub.url}: ${err.message}`, "error");
+    }
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -346,11 +637,23 @@ export function startApiServer(client) {
 
   const app = express();
 
+  // ── Advanced Rate Limiter Configuration ─────────────────────────────────────
+  const endpointLimits = new Map([
+    ["/api/search", { windowMs: 60000, maxRequests: 30 }],
+    ["/api/batch", { windowMs: 60000, maxRequests: 20 }],
+    ["/api/webhooks", { windowMs: 60000, maxRequests: 50 }],
+    ["/api/kpi", { windowMs: 60000, maxRequests: 60 }],
+    ["/api/players", { windowMs: 60000, maxRequests: 100 }],
+  ]);
+
   // ── Global Middleware ───────────────────────────────────────────────────────
   app.use(express.json({ limit: "1mb" }));
+  app.use(requestIdMiddleware);
+  app.use(responseHeaders);
   app.use(corsMiddleware);
   app.use(requestLogger);
-  app.use(rateLimiter(60000, 200)); // 200 requests per minute
+  app.use(metricsMiddleware);
+  app.use(advancedRateLimiter(endpointLimits));
 
   const auth = authenticate(apiKey);
 
@@ -362,18 +665,29 @@ export function startApiServer(client) {
    * GET /api
    * API information and available endpoints.
    */
-  app.get("/api", (_req, res) => {
+  app.get("/api", (req, res) => {
     res.json(
       successResponse({
         name: "Nerox Bot API",
-        version: "4.0.0",
+        version: API_VERSION,
+        requestId: req.requestId,
         authentication: {
           method: "API Key",
           header: "x-api-key (recommended)",
           queryParam: "apiKey (less secure, may appear in logs)",
         },
+        features: {
+          rateLimit: "Per-endpoint rate limiting with headers",
+          requestId: "Unique request ID for tracking",
+          websocket: "Real-time updates via WebSocket at /api/ws",
+          webhooks: "Event notifications to external URLs",
+          metrics: "API usage analytics",
+          batchOperations: "Bulk operations support",
+          search: "Search users and guilds",
+        },
         endpoints: {
           health: "GET /api/health",
+          metrics: "GET /api/metrics",
           database: {
             list: "GET /api/db",
             getAll: "GET /api/db/:collection",
@@ -404,9 +718,23 @@ export function startApiServer(client) {
           },
           users: {
             lookup: "GET /api/users/:userId",
+            mutualGuilds: "GET /api/users/:userId/mutual-guilds",
           },
           guilds: {
             lookup: "GET /api/guilds/:guildId",
+          },
+          search: {
+            guilds: "GET /api/search/guilds",
+            users: "GET /api/search/users",
+          },
+          batch: {
+            blacklist: "POST /api/batch/blacklist",
+            premium: "POST /api/batch/premium",
+          },
+          webhooks: {
+            list: "GET /api/webhooks",
+            create: "POST /api/webhooks",
+            delete: "DELETE /api/webhooks/:webhookId",
           },
           blacklist: {
             list: "GET /api/blacklist",
@@ -456,6 +784,10 @@ export function startApiServer(client) {
             skip: "POST /api/players/:guildId/skip",
             stop: "POST /api/players/:guildId/stop",
             volume: "POST /api/players/:guildId/volume",
+          },
+          websocket: {
+            connect: "WS /api/ws?apiKey=YOUR_API_KEY",
+            events: ["player.start", "player.end", "player.pause", "player.resume", "guild.join", "guild.leave"],
           },
         },
       }),
@@ -1335,6 +1667,129 @@ export function startApiServer(client) {
     } catch (err) {
       log(`API error on GET /api/users/${userId}: ${err.message}`, "error");
       res.status(500).json(errorResponse("Server Error", "Failed to fetch user."));
+    }
+  });
+
+  /**
+   * GET /api/users/:userId/mutual-guilds
+   * Get all mutual servers between a user and the bot, including admin permission check.
+   */
+  app.get("/api/users/:userId/mutual-guilds", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const user = await client.users.fetch(userId).catch(() => null);
+      if (!user) {
+        return res.status(404).json(errorResponse("Not Found", `User ${userId} not found.`));
+      }
+
+      const mutualGuilds = [];
+      const adminGuilds = [];
+      const manageGuilds = [];
+
+      // Iterate through all guilds the bot is in
+      for (const [guildId, guild] of client.guilds.cache) {
+        try {
+          // Try to get the member from cache first, then fetch if needed
+          let member = guild.members.cache.get(userId);
+          if (!member) {
+            member = await guild.members.fetch(userId).catch(() => null);
+          }
+
+          if (member) {
+            const permissions = member.permissions;
+            const isOwner = guild.ownerId === userId;
+            const isAdmin = isOwner || permissions.has("Administrator");
+            const canManageGuild = isOwner || permissions.has("ManageGuild");
+            const canManageChannels = permissions.has("ManageChannels");
+            const canManageRoles = permissions.has("ManageRoles");
+            const canKickMembers = permissions.has("KickMembers");
+            const canBanMembers = permissions.has("BanMembers");
+
+            // Check guild premium status
+            const [isPremiumGuild, is247Enabled] = await Promise.all([
+              safeHas(client.db.serverstaff, guildId),
+              safeHas(client.db.twoFourSeven, guildId),
+            ]);
+
+            const guildData = {
+              id: guild.id,
+              name: guild.name,
+              icon: guild.iconURL({ forceStatic: false, size: 128 }),
+              memberCount: guild.memberCount,
+              ownerId: guild.ownerId,
+              isOwner,
+              permissions: {
+                administrator: isAdmin,
+                manageGuild: canManageGuild,
+                manageChannels: canManageChannels,
+                manageRoles: canManageRoles,
+                kickMembers: canKickMembers,
+                banMembers: canBanMembers,
+              },
+              userRoles: member.roles.cache
+                .filter((r) => r.id !== guild.id) // Filter out @everyone
+                .sort((a, b) => b.position - a.position)
+                .first(5)
+                ?.map((r) => ({ id: r.id, name: r.name, color: r.hexColor })) ?? [],
+              highestRole: {
+                id: member.roles.highest.id,
+                name: member.roles.highest.name,
+                color: member.roles.highest.hexColor,
+                position: member.roles.highest.position,
+              },
+              joinedAt: member.joinedAt,
+              nickname: member.nickname,
+              botStatus: {
+                isPremium: isPremiumGuild,
+                is247Enabled,
+                hasActivePlayer: !!client.manager?.players?.get(guildId),
+              },
+            };
+
+            mutualGuilds.push(guildData);
+
+            if (isAdmin) {
+              adminGuilds.push(guildData);
+            }
+
+            if (canManageGuild) {
+              manageGuilds.push(guildData);
+            }
+          }
+        } catch {
+          // Skip guilds where we can't fetch member info
+          continue;
+        }
+      }
+
+      // Sort by member count descending
+      mutualGuilds.sort((a, b) => b.memberCount - a.memberCount);
+      adminGuilds.sort((a, b) => b.memberCount - a.memberCount);
+      manageGuilds.sort((a, b) => b.memberCount - a.memberCount);
+
+      res.json(
+        successResponse({
+          userId,
+          username: user.username,
+          avatar: user.displayAvatarURL({ forceStatic: false, size: 256 }),
+          summary: {
+            totalMutualGuilds: mutualGuilds.length,
+            adminGuildsCount: adminGuilds.length,
+            manageGuildsCount: manageGuilds.length,
+          },
+          mutualGuilds,
+          adminGuilds,
+          manageGuilds,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/users/${userId}/mutual-guilds: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch mutual guilds."));
     }
   });
 
@@ -2456,6 +2911,482 @@ export function startApiServer(client) {
   });
 
   // ══════════════════════════════════════════════════════════════════════════════
+  // ADVANCED: API METRICS ENDPOINT
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/metrics
+   * Get API usage metrics and analytics.
+   */
+  app.get("/api/metrics", auth, (_req, res) => {
+    try {
+      const uptimeMs = Date.now() - apiMetrics.startTime;
+      const avgLatency = apiMetrics.latency.count > 0
+        ? Math.round(apiMetrics.latency.total / apiMetrics.latency.count)
+        : 0;
+
+      // Calculate latency per endpoint
+      const endpointLatency = {};
+      for (const [endpoint, data] of Object.entries(apiMetrics.latency.byEndpoint)) {
+        endpointLatency[endpoint] = {
+          averageMs: Math.round(data.total / data.count),
+          totalRequests: data.count,
+        };
+      }
+
+      // Get top 10 endpoints by request count
+      const topEndpoints = Object.entries(apiMetrics.requests.byEndpoint)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 10)
+        .map(([endpoint, count]) => ({ endpoint, count }));
+
+      // Calculate success rate
+      const successCodes = Object.entries(apiMetrics.requests.byStatus)
+        .filter(([code]) => parseInt(code) < 400)
+        .reduce((sum, [, count]) => sum + count, 0);
+      const successRate = apiMetrics.requests.total > 0
+        ? ((successCodes / apiMetrics.requests.total) * 100).toFixed(2)
+        : 100;
+
+      res.json(
+        successResponse({
+          uptime: {
+            ms: uptimeMs,
+            formatted: formatUptime(uptimeMs),
+          },
+          requests: {
+            total: apiMetrics.requests.total,
+            byMethod: apiMetrics.requests.byMethod,
+            byStatus: apiMetrics.requests.byStatus,
+            topEndpoints,
+          },
+          performance: {
+            averageLatencyMs: avgLatency,
+            byEndpoint: endpointLatency,
+          },
+          health: {
+            successRate: `${successRate}%`,
+            recentErrors: apiMetrics.errors.slice(-10),
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/metrics: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch metrics."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // ADVANCED: SEARCH ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/search/guilds
+   * Search guilds by name with filters.
+   */
+  app.get("/api/search/guilds", auth, async (req, res) => {
+    try {
+      const {
+        query = "",
+        minMembers,
+        maxMembers,
+        hasPlayer,
+        isPremium,
+        limit = 25,
+        offset = 0,
+      } = req.query;
+
+      let guilds = [...client.guilds.cache.values()];
+
+      // Apply filters
+      if (query) {
+        const searchQuery = query.toLowerCase();
+        guilds = guilds.filter((g) =>
+          g.name.toLowerCase().includes(searchQuery) ||
+          g.id.includes(searchQuery)
+        );
+      }
+
+      if (minMembers) {
+        guilds = guilds.filter((g) => g.memberCount >= parseInt(minMembers));
+      }
+
+      if (maxMembers) {
+        guilds = guilds.filter((g) => g.memberCount <= parseInt(maxMembers));
+      }
+
+      if (hasPlayer === "true") {
+        guilds = guilds.filter((g) => client.manager?.players?.has(g.id));
+      } else if (hasPlayer === "false") {
+        guilds = guilds.filter((g) => !client.manager?.players?.has(g.id));
+      }
+
+      // Premium filter requires async check
+      if (isPremium === "true" || isPremium === "false") {
+        const premiumGuilds = await getAllEntries(client.db.serverstaff);
+        const premiumIds = new Set(Object.keys(premiumGuilds));
+        if (isPremium === "true") {
+          guilds = guilds.filter((g) => premiumIds.has(g.id));
+        } else {
+          guilds = guilds.filter((g) => !premiumIds.has(g.id));
+        }
+      }
+
+      const total = guilds.length;
+      const limitNum = Math.min(parseInt(limit) || 25, 100);
+      const offsetNum = parseInt(offset) || 0;
+
+      guilds = guilds.slice(offsetNum, offsetNum + limitNum);
+
+      const mapped = guilds.map((g) => ({
+        id: g.id,
+        name: g.name,
+        memberCount: g.memberCount,
+        icon: g.iconURL({ forceStatic: false, size: 128 }),
+        hasPlayer: !!client.manager?.players?.get(g.id),
+      }));
+
+      res.json(
+        successResponse({
+          query,
+          total,
+          limit: limitNum,
+          offset: offsetNum,
+          hasMore: offsetNum + limitNum < total,
+          results: mapped,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/search/guilds: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to search guilds."));
+    }
+  });
+
+  /**
+   * GET /api/search/users
+   * Search users across all guilds by username or ID.
+   */
+  app.get("/api/search/users", auth, async (req, res) => {
+    try {
+      const { query = "", limit = 25, offset = 0 } = req.query;
+
+      if (!query || query.length < 2) {
+        return res.status(400).json(errorResponse("Bad Request", "Query must be at least 2 characters."));
+      }
+
+      const searchQuery = query.toLowerCase();
+      const results = [];
+      const seen = new Set();
+
+      // Search through all guild members
+      for (const guild of client.guilds.cache.values()) {
+        for (const member of guild.members.cache.values()) {
+          if (seen.has(member.user.id)) continue;
+
+          const matches =
+            member.user.username.toLowerCase().includes(searchQuery) ||
+            member.user.id.includes(searchQuery) ||
+            (member.nickname && member.nickname.toLowerCase().includes(searchQuery));
+
+          if (matches) {
+            seen.add(member.user.id);
+            results.push({
+              id: member.user.id,
+              username: member.user.username,
+              avatar: member.user.displayAvatarURL({ forceStatic: false, size: 128 }),
+              bot: member.user.bot,
+              mutualGuilds: client.guilds.cache.filter((g) => g.members.cache.has(member.user.id)).size,
+            });
+          }
+        }
+      }
+
+      const total = results.length;
+      const limitNum = Math.min(parseInt(limit) || 25, 100);
+      const offsetNum = parseInt(offset) || 0;
+
+      res.json(
+        successResponse({
+          query,
+          total,
+          limit: limitNum,
+          offset: offsetNum,
+          hasMore: offsetNum + limitNum < total,
+          results: results.slice(offsetNum, offsetNum + limitNum),
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/search/users: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to search users."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // ADVANCED: BATCH OPERATIONS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * POST /api/batch/blacklist
+   * Batch add/remove users from blacklist.
+   */
+  app.post("/api/batch/blacklist", auth, async (req, res) => {
+    const { action, userIds, reason } = req.body ?? {};
+
+    if (!["add", "remove"].includes(action)) {
+      return res.status(400).json(errorResponse("Bad Request", "Action must be 'add' or 'remove'."));
+    }
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json(errorResponse("Bad Request", "userIds must be a non-empty array."));
+    }
+
+    if (userIds.length > 50) {
+      return res.status(400).json(errorResponse("Bad Request", "Maximum 50 users per batch operation."));
+    }
+
+    try {
+      const results = { success: [], failed: [] };
+
+      for (const userId of userIds) {
+        if (!/^\d{17,19}$/.test(userId)) {
+          results.failed.push({ userId, error: "Invalid user ID format." });
+          continue;
+        }
+
+        if (action === "add" && client.owners?.includes(userId)) {
+          results.failed.push({ userId, error: "Cannot blacklist bot owners." });
+          continue;
+        }
+
+        try {
+          if (action === "add") {
+            await client.db.blacklist.set(userId, {
+              reason: reason || "Batch blacklisted via API",
+              at: Date.now(),
+              by: "API",
+            });
+          } else {
+            await client.db.blacklist.delete(userId);
+          }
+          results.success.push(userId);
+        } catch (err) {
+          results.failed.push({ userId, error: err.message });
+        }
+      }
+
+      res.json(
+        successResponse({
+          action,
+          total: userIds.length,
+          successCount: results.success.length,
+          failedCount: results.failed.length,
+          results,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/batch/blacklist: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to process batch blacklist."));
+    }
+  });
+
+  /**
+   * POST /api/batch/premium
+   * Batch add/remove premium from users.
+   */
+  app.post("/api/batch/premium", auth, async (req, res) => {
+    const { action, userIds, days, permanent } = req.body ?? {};
+
+    if (!["add", "remove"].includes(action)) {
+      return res.status(400).json(errorResponse("Bad Request", "Action must be 'add' or 'remove'."));
+    }
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json(errorResponse("Bad Request", "userIds must be a non-empty array."));
+    }
+
+    if (userIds.length > 50) {
+      return res.status(400).json(errorResponse("Bad Request", "Maximum 50 users per batch operation."));
+    }
+
+    if (action === "add" && !permanent && (!days || typeof days !== "number" || days < 1 || days > 365)) {
+      return res.status(400).json(errorResponse("Bad Request", "Days must be between 1 and 365 for non-permanent premium."));
+    }
+
+    try {
+      const results = { success: [], failed: [] };
+
+      for (const userId of userIds) {
+        if (!/^\d{17,19}$/.test(userId)) {
+          results.failed.push({ userId, error: "Invalid user ID format." });
+          continue;
+        }
+
+        try {
+          if (action === "add") {
+            const data = {
+              redeemedAt: Date.now(),
+              addedBy: "API (Batch)",
+            };
+
+            if (permanent) {
+              data.permanent = true;
+            } else {
+              data.expiresAt = Date.now() + days * 86400000;
+            }
+
+            await client.db.botstaff.set(userId, data);
+          } else {
+            await client.db.botstaff.delete(userId);
+          }
+          results.success.push(userId);
+        } catch (err) {
+          results.failed.push({ userId, error: err.message });
+        }
+      }
+
+      res.json(
+        successResponse({
+          action,
+          total: userIds.length,
+          successCount: results.success.length,
+          failedCount: results.failed.length,
+          results,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/batch/premium: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to process batch premium."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // ADVANCED: WEBHOOK MANAGEMENT
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/webhooks
+   * Get all webhook subscriptions.
+   */
+  app.get("/api/webhooks", auth, (_req, res) => {
+    const subscriptions = [];
+    for (const [event, subs] of webhookSubscriptions) {
+      for (const sub of subs) {
+        subscriptions.push({
+          id: sub.id,
+          event,
+          url: sub.url,
+          createdAt: sub.createdAt,
+        });
+      }
+    }
+
+    res.json(
+      successResponse({
+        count: subscriptions.length,
+        availableEvents: ["player.start", "player.end", "player.pause", "player.resume", "guild.join", "guild.leave"],
+        subscriptions,
+      }),
+    );
+  });
+
+  /**
+   * POST /api/webhooks
+   * Create a new webhook subscription.
+   */
+  app.post("/api/webhooks", auth, (req, res) => {
+    const { event, url, secret } = req.body ?? {};
+
+    const validEvents = ["player.start", "player.end", "player.pause", "player.resume", "guild.join", "guild.leave"];
+
+    if (!validEvents.includes(event)) {
+      return res.status(400).json(errorResponse("Bad Request", `Event must be one of: ${validEvents.join(", ")}`));
+    }
+
+    if (!url || !/^https?:\/\/.+/.test(url)) {
+      return res.status(400).json(errorResponse("Bad Request", "Valid URL is required."));
+    }
+
+    const id = crypto.randomUUID();
+    const subscription = {
+      id,
+      url,
+      secret: secret || crypto.randomBytes(16).toString("hex"),
+      createdAt: Date.now(),
+    };
+
+    if (!webhookSubscriptions.has(event)) {
+      webhookSubscriptions.set(event, []);
+    }
+    webhookSubscriptions.get(event).push(subscription);
+
+    res.status(201).json(
+      successResponse({
+        id,
+        event,
+        url,
+        secret: subscription.secret,
+        message: "Webhook subscription created. Keep the secret safe for signature verification.",
+      }),
+    );
+  });
+
+  /**
+   * DELETE /api/webhooks/:webhookId
+   * Delete a webhook subscription.
+   */
+  app.delete("/api/webhooks/:webhookId", auth, (req, res) => {
+    const { webhookId } = req.params;
+
+    for (const [event, subs] of webhookSubscriptions) {
+      const index = subs.findIndex((s) => s.id === webhookId);
+      if (index !== -1) {
+        subs.splice(index, 1);
+        return res.json(
+          successResponse({
+            webhookId,
+            event,
+            action: "deleted",
+          }),
+        );
+      }
+    }
+
+    res.status(404).json(errorResponse("Not Found", "Webhook subscription not found."));
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // ADVANCED: WEBSOCKET SUPPORT FOR REAL-TIME UPDATES
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  // WebSocket clients store
+  const wsClients = new Set();
+
+  /**
+   * Broadcast message to all connected WebSocket clients.
+   * @param {string} type - Message type.
+   * @param {object} data - Message data.
+   */
+  function broadcastToWebSocket(type, data) {
+    const message = JSON.stringify({
+      type,
+      timestamp: new Date().toISOString(),
+      data,
+    });
+
+    for (const client of wsClients) {
+      if (client.readyState === 1) { // WebSocket.OPEN
+        client.send(message);
+      }
+    }
+
+    // Also send webhook notification
+    sendWebhookNotification(type, data);
+  }
+
+  // Store broadcast function on client for use by player events
+  client.apiBroadcast = broadcastToWebSocket;
+
+  // ══════════════════════════════════════════════════════════════════════════════
   // ERROR HANDLING & SERVER START
   // ══════════════════════════════════════════════════════════════════════════════
 
@@ -2467,10 +3398,64 @@ export function startApiServer(client) {
   // Error handler
   app.use(errorHandler);
 
-  // Start server
-  app.listen(port, () => {
+  // Create HTTP server and WebSocket server
+  const server = createServer(app);
+  const wss = new WebSocketServer({ server, path: "/api/ws" });
+
+  // WebSocket connection handler
+  wss.on("connection", (ws, req) => {
+    // Authenticate WebSocket connection
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const providedKey = url.searchParams.get("apiKey") || req.headers["x-api-key"];
+
+    if (!providedKey || providedKey !== apiKey) {
+      ws.close(1008, "Unauthorized: Invalid or missing API key");
+      return;
+    }
+
+    log("WebSocket client connected", "debug");
+    wsClients.add(ws);
+
+    // Send welcome message
+    ws.send(JSON.stringify({
+      type: "connection",
+      timestamp: new Date().toISOString(),
+      data: {
+        message: "Connected to Nerox Bot WebSocket API",
+        version: API_VERSION,
+        availableEvents: ["player.start", "player.end", "player.pause", "player.resume", "guild.join", "guild.leave"],
+      },
+    }));
+
+    ws.on("close", () => {
+      log("WebSocket client disconnected", "debug");
+      wsClients.delete(ws);
+    });
+
+    ws.on("error", (err) => {
+      log(`WebSocket error: ${err.message}`, "error");
+      wsClients.delete(ws);
+    });
+
+    // Handle incoming messages (for ping/pong or subscriptions)
+    ws.on("message", (message) => {
+      try {
+        const data = JSON.parse(message);
+        if (data.type === "ping") {
+          ws.send(JSON.stringify({ type: "pong", timestamp: new Date().toISOString() }));
+        }
+      } catch {
+        // Ignore invalid messages
+      }
+    });
+  });
+
+  // Start server with WebSocket support
+  server.listen(port, () => {
     log(`REST API server listening on port ${port}`, "info");
     log(`API endpoints available at http://localhost:${port}/api`, "info");
+    log(`WebSocket endpoint available at ws://localhost:${port}/api/ws`, "info");
+    log(`API Version: ${API_VERSION}`, "info");
   });
 }
 
