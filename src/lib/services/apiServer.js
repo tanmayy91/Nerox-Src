@@ -2,7 +2,7 @@ import os from "os";
 import crypto from "crypto";
 import express from "express";
 import { createServer } from "http";
-import { WebSocketServer } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { log } from "../../logger.js";
 import {
   getAllEntries,
@@ -105,7 +105,8 @@ class APICache {
 const apiCache = new APICache();
 
 // Cleanup cache periodically
-setInterval(() => apiCache.cleanup(), CACHE_TTL_MS);
+const cacheCleanupInterval = setInterval(() => apiCache.cleanup(), CACHE_TTL_MS);
+cacheCleanupInterval.unref?.();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AUDIT LOGGING SYSTEM
@@ -281,6 +282,13 @@ function paginateResponse(items, limit, offset) {
  * @returns {object} Cloned object.
  */
 function deepClone(obj) {
+  if (typeof globalThis.structuredClone === "function") {
+    try {
+      return globalThis.structuredClone(obj);
+    } catch {
+      // Fallback to JSON clone for non-structured-cloneable values
+    }
+  }
   return JSON.parse(JSON.stringify(obj));
 }
 
@@ -497,7 +505,7 @@ function advancedRateLimiter(endpointLimits = new Map()) {
   const defaultLimit = { windowMs: 60000, maxRequests: 100 };
 
   // Cleanup old entries periodically
-  setInterval(() => {
+  const rateLimitCleanupInterval = setInterval(() => {
     const now = Date.now();
     for (const [key, record] of requests) {
       if (now > record.resetAt + RATE_LIMIT_CLEANUP_BUFFER_MS) {
@@ -505,6 +513,7 @@ function advancedRateLimiter(endpointLimits = new Map()) {
       }
     }
   }, RATE_LIMIT_CLEANUP_BUFFER_MS);
+  rateLimitCleanupInterval.unref?.();
 
   return (req, res, next) => {
     const ip = req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress;
@@ -5413,7 +5422,7 @@ export function startApiServer(client) {
     });
 
     for (const wsClient of wsClients) {
-      if (wsClient.readyState === WebSocketServer.OPEN || wsClient.readyState === 1) {
+      if (wsClient.readyState === WebSocket.OPEN) {
         wsClient.send(message);
       }
     }
@@ -5444,7 +5453,13 @@ export function startApiServer(client) {
   // WebSocket connection handler
   wss.on("connection", (ws, req) => {
     // Authenticate WebSocket connection
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    let url;
+    try {
+      url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    } catch {
+      ws.close(1008, "Unauthorized: Invalid request URL");
+      return;
+    }
     const providedKey = url.searchParams.get("apiKey") || req.headers["x-api-key"];
 
     if (!providedKey || providedKey !== apiKey) {
@@ -5495,5 +5510,7 @@ export function startApiServer(client) {
     log(`API endpoints available at http://localhost:${port}/api`, "info");
     log(`WebSocket endpoint available at ws://localhost:${port}/api/ws`, "info");
     log(`API Version: ${API_VERSION}`, "info");
+  }).on("error", (err) => {
+    log(`Failed to start REST API server on port ${port}: ${err.message}`, "error");
   });
 }
