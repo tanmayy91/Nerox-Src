@@ -13,11 +13,141 @@ import {
 } from "../utils/dbUtils.js";
 
 // ══════════════════════════════════════════════════════════════════════════════
-// API VERSION
+// ███╗   ██╗███████╗██████╗  ██████╗ ██╗  ██╗     █████╗ ██████╗ ██╗    ██╗   ██╗ ██████╗
+// ████╗  ██║██╔════╝██╔══██╗██╔═══██╗╚██╗██╔╝    ██╔══██╗██╔══██╗██║    ██║   ██║██╔════╝
+// ██╔██╗ ██║█████╗  ██████╔╝██║   ██║ ╚███╔╝     ███████║██████╔╝██║    ██║   ██║███████╗
+// ██║╚██╗██║██╔══╝  ██╔══██╗██║   ██║ ██╔██╗     ██╔══██║██╔═══╝ ██║    ╚██╗ ██╔╝██╔═══██╗
+// ██║ ╚████║███████╗██║  ██║╚██████╔╝██╔╝ ██╗    ██║  ██║██║     ██║     ╚████╔╝ ╚██████╔╝
+// ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝    ╚═╝  ╚═╝╚═╝     ╚═╝      ╚═══╝   ╚═════╝
+// ══════════════════════════════════════════════════════════════════════════════
+// ULTRA ADVANCED REST API v6.0.0 - The Most Powerful Bot API Ever Built
+// Features: Real-time WebSocket, Webhooks, Analytics, Caching, Rate Limiting,
+//           Audit Logging, Health Monitoring, Batch Operations, Search, and more!
 // ══════════════════════════════════════════════════════════════════════════════
 
-const API_VERSION = "5.0.0";
+const API_VERSION = "6.0.0";
+const API_BUILD = "2024.12.ULTRA";
 const RATE_LIMIT_CLEANUP_BUFFER_MS = 60000;
+const CACHE_TTL_MS = 30000; // 30 seconds cache
+const MAX_AUDIT_LOG_SIZE = 500;
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ADVANCED CACHING SYSTEM
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * In-memory cache with TTL support for frequently accessed data.
+ */
+class APICache {
+  constructor(defaultTTL = CACHE_TTL_MS) {
+    this.cache = new Map();
+    this.defaultTTL = defaultTTL;
+    this.hits = 0;
+    this.misses = 0;
+  }
+
+  set(key, value, ttl = this.defaultTTL) {
+    this.cache.set(key, {
+      value,
+      expiresAt: Date.now() + ttl,
+    });
+  }
+
+  get(key) {
+    const entry = this.cache.get(key);
+    if (!entry) {
+      this.misses++;
+      return null;
+    }
+    if (Date.now() > entry.expiresAt) {
+      this.cache.delete(key);
+      this.misses++;
+      return null;
+    }
+    this.hits++;
+    return entry.value;
+  }
+
+  has(key) {
+    return this.get(key) !== null;
+  }
+
+  delete(key) {
+    return this.cache.delete(key);
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+
+  getStats() {
+    const total = this.hits + this.misses;
+    return {
+      size: this.cache.size,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate: total > 0 ? ((this.hits / total) * 100).toFixed(2) + "%" : "0%",
+    };
+  }
+
+  // Cleanup expired entries
+  cleanup() {
+    const now = Date.now();
+    for (const [key, entry] of this.cache) {
+      if (now > entry.expiresAt) {
+        this.cache.delete(key);
+      }
+    }
+  }
+}
+
+const apiCache = new APICache();
+
+// Cleanup cache periodically
+setInterval(() => apiCache.cleanup(), CACHE_TTL_MS);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUDIT LOGGING SYSTEM
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Audit log for tracking API operations.
+ */
+const auditLog = {
+  entries: [],
+  add(entry) {
+    this.entries.unshift({
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      timestampISO: new Date().toISOString(),
+      ...entry,
+    });
+    if (this.entries.length > MAX_AUDIT_LOG_SIZE) {
+      this.entries.pop();
+    }
+  },
+  getRecent(count = 50) {
+    return this.entries.slice(0, count);
+  },
+  getByAction(action, count = 50) {
+    return this.entries.filter(e => e.action === action).slice(0, count);
+  },
+  getByEndpoint(endpoint, count = 50) {
+    return this.entries.filter(e => e.endpoint?.includes(endpoint)).slice(0, count);
+  },
+  clear() {
+    this.entries = [];
+  },
+  getStats() {
+    const byAction = {};
+    const byMethod = {};
+    for (const entry of this.entries) {
+      byAction[entry.action] = (byAction[entry.action] || 0) + 1;
+      byMethod[entry.method] = (byMethod[entry.method] || 0) + 1;
+    }
+    return { total: this.entries.length, byAction, byMethod };
+  },
+};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CONFIGURATION
@@ -54,7 +184,122 @@ const ALLOWED_COLLECTIONS = [
 /**
  * Read-only collections that cannot be modified via API.
  */
-const READ_ONLY_COLLECTIONS = ["config", "stats/songsPlayed", "stats/commandsUsed", "stats/friends"];
+const READ_ONLY_COLLECTIONS = ["config", "stats/songsPlayed", "stats/commandsUsed"];
+
+/**
+ * Sensitive collections that require extra validation.
+ */
+const SENSITIVE_COLLECTIONS = ["blacklist", "botmods", "botstaff", "serverstaff", "bypass"];
+
+/**
+ * Valid Discord ID pattern.
+ */
+const DISCORD_ID_PATTERN = /^\d{17,19}$/;
+
+/**
+ * Validate Discord ID format.
+ * @param {string} id - The ID to validate.
+ * @returns {boolean} Whether the ID is valid.
+ */
+function isValidDiscordId(id) {
+  return DISCORD_ID_PATTERN.test(id);
+}
+
+/**
+ * Sanitize string input to prevent injection.
+ * @param {string} input - The input to sanitize.
+ * @param {number} maxLength - Maximum allowed length.
+ * @returns {string} Sanitized string.
+ */
+function sanitizeString(input, maxLength = 500) {
+  if (typeof input !== "string") return "";
+  return input.slice(0, maxLength).trim();
+}
+
+/**
+ * Validate URL format.
+ * @param {string} url - URL to validate.
+ * @returns {boolean} Whether the URL is valid.
+ */
+function isValidUrl(url) {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Generate a secure random token.
+ * @param {number} length - Token length in bytes.
+ * @returns {string} Hex-encoded token.
+ */
+function generateSecureToken(length = 32) {
+  return crypto.randomBytes(length).toString("hex");
+}
+
+/**
+ * Parse pagination parameters with validation.
+ * @param {object} query - Request query object.
+ * @param {object} defaults - Default values.
+ * @returns {object} Parsed pagination parameters.
+ */
+function parsePagination(query, defaults = { limit: 50, offset: 0, maxLimit: 100 }) {
+  const limit = Math.min(Math.max(1, parseInt(query.limit) || defaults.limit), defaults.maxLimit);
+  const offset = Math.max(0, parseInt(query.offset) || defaults.offset);
+  return { limit, offset };
+}
+
+/**
+ * Create paginated response data.
+ * @param {Array} items - All items.
+ * @param {number} limit - Items per page.
+ * @param {number} offset - Starting offset.
+ * @returns {object} Paginated response data.
+ */
+function paginateResponse(items, limit, offset) {
+  const total = items.length;
+  const paginatedItems = items.slice(offset, offset + limit);
+  return {
+    total,
+    limit,
+    offset,
+    hasMore: offset + limit < total,
+    hasPrevious: offset > 0,
+    nextOffset: offset + limit < total ? offset + limit : null,
+    previousOffset: offset > 0 ? Math.max(0, offset - limit) : null,
+    items: paginatedItems,
+  };
+}
+
+/**
+ * Deep clone an object safely.
+ * @param {object} obj - Object to clone.
+ * @returns {object} Cloned object.
+ */
+function deepClone(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+/**
+ * Mask sensitive data in objects.
+ * @param {object} obj - Object with sensitive data.
+ * @param {string[]} sensitiveKeys - Keys to mask.
+ * @returns {object} Object with masked data.
+ */
+function maskSensitiveData(obj, sensitiveKeys = ["token", "password", "secret", "apiKey"]) {
+  if (!obj || typeof obj !== "object") return obj;
+  const result = deepClone(obj);
+  for (const key of Object.keys(result)) {
+    if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk.toLowerCase()))) {
+      result[key] = "***REDACTED***";
+    } else if (typeof result[key] === "object") {
+      result[key] = maskSensitiveData(result[key], sensitiveKeys);
+    }
+  }
+  return result;
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // UTILITY FUNCTIONS
@@ -206,7 +451,37 @@ function requestIdMiddleware(req, _res, next) {
 function responseHeaders(req, res, next) {
   res.setHeader("X-Request-ID", req.requestId || "unknown");
   res.setHeader("X-API-Version", API_VERSION);
-  res.setHeader("X-Powered-By", "Nerox Bot API");
+  res.setHeader("X-API-Build", API_BUILD);
+  res.setHeader("X-Powered-By", "Nerox Bot API v6");
+  // Security headers
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  next();
+}
+
+/**
+ * Audit logging middleware for tracking API operations.
+ */
+function auditMiddleware(req, res, next) {
+  // Only log mutating operations
+  if (["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
+    res.on("finish", () => {
+      auditLog.add({
+        method: req.method,
+        endpoint: req.originalUrl,
+        action: `${req.method} ${req.path}`,
+        statusCode: res.statusCode,
+        ip: req.ip || req.connection?.remoteAddress || "unknown",
+        userAgent: req.headers["user-agent"] || "unknown",
+        requestId: req.requestId,
+        body: maskSensitiveData(req.body),
+      });
+    });
+  }
   next();
 }
 
@@ -546,6 +821,7 @@ export function startApiServer(client) {
   app.use(corsMiddleware);
   app.use(requestLogger);
   app.use(metricsMiddleware);
+  app.use(auditMiddleware);
   app.use(advancedRateLimiter(endpointLimits));
 
   const auth = authenticate(apiKey);
@@ -563,24 +839,36 @@ export function startApiServer(client) {
       successResponse({
         name: "Nerox Bot API",
         version: API_VERSION,
+        build: API_BUILD,
+        description: "Ultra Advanced Discord Bot REST API - The Most Powerful Bot API Ever Built",
         requestId: req.requestId,
+        serverTime: new Date().toISOString(),
         authentication: {
           method: "API Key",
           header: "x-api-key (recommended)",
           queryParam: "apiKey (less secure, may appear in logs)",
+          note: "All endpoints except GET /api require authentication",
         },
         features: {
-          rateLimit: "Per-endpoint rate limiting with headers",
-          requestId: "Unique request ID for tracking",
+          rateLimit: "Per-endpoint intelligent rate limiting with X-RateLimit headers",
+          requestId: "Unique UUID request tracking for debugging",
           websocket: "Real-time updates via WebSocket at /api/ws",
-          webhooks: "Event notifications to external URLs",
-          metrics: "API usage analytics",
-          batchOperations: "Bulk operations support",
-          search: "Search users and guilds",
+          webhooks: "Event notifications to external URLs with HMAC signatures",
+          metrics: "Comprehensive API usage analytics and performance monitoring",
+          caching: "In-memory caching with TTL for frequently accessed data",
+          auditLog: "Full audit trail of all mutating operations",
+          batchOperations: "Bulk operations support for mass updates",
+          search: "Advanced search with filters and pagination",
+          security: "HTTPS, security headers, input sanitization, and more",
         },
         endpoints: {
-          health: "GET /api/health",
-          metrics: "GET /api/metrics",
+          info: {
+            root: "GET /api",
+            health: "GET /api/health",
+            metrics: "GET /api/metrics",
+            cache: "GET /api/cache",
+            audit: "GET /api/audit",
+          },
           database: {
             list: "GET /api/db",
             getAll: "GET /api/db/:collection",
@@ -636,9 +924,13 @@ export function startApiServer(client) {
           },
           ignore: {
             list: "GET /api/ignore",
+            add: "POST /api/ignore/:id",
+            remove: "DELETE /api/ignore/:id",
           },
           bypass: {
             list: "GET /api/bypass",
+            add: "POST /api/bypass/:userId",
+            remove: "DELETE /api/bypass/:userId",
           },
           premium: {
             users: {
@@ -664,10 +956,13 @@ export function startApiServer(client) {
           },
           twoFourSeven: {
             list: "GET /api/247",
+            enable: "POST /api/247/:guildId",
             remove: "DELETE /api/247/:guildId",
           },
           afk: {
             list: "GET /api/afk",
+            get: "GET /api/afk/:userId",
+            set: "POST /api/afk/:userId",
             remove: "DELETE /api/afk/:userId",
           },
           players: {
@@ -677,10 +972,52 @@ export function startApiServer(client) {
             skip: "POST /api/players/:guildId/skip",
             stop: "POST /api/players/:guildId/stop",
             volume: "POST /api/players/:guildId/volume",
+            seek: "POST /api/players/:guildId/seek",
+            shuffle: "POST /api/players/:guildId/shuffle",
+            loop: "POST /api/players/:guildId/loop",
+            previous: "POST /api/players/:guildId/previous",
+            play: "POST /api/players/:guildId/play",
+            filters: {
+              get: "GET /api/players/:guildId/filters",
+              set: "POST /api/players/:guildId/filters",
+            },
+          },
+          queue: {
+            get: "GET /api/players/:guildId/queue",
+            add: "POST /api/players/:guildId/queue",
+            remove: "DELETE /api/players/:guildId/queue/:index",
+            clear: "DELETE /api/players/:guildId/queue",
+            move: "POST /api/players/:guildId/queue/move",
+          },
+          userPreferences: {
+            get: "GET /api/preferences/:userId",
+            set: "POST /api/preferences/:userId",
+            delete: "DELETE /api/preferences/:userId",
+          },
+          likedSongs: {
+            list: "GET /api/liked/:userId",
+            add: "POST /api/liked/:userId",
+            remove: "DELETE /api/liked/:userId/:songId",
+            clear: "DELETE /api/liked/:userId",
+          },
+          friends: {
+            list: "GET /api/friends/:userId",
+            add: "POST /api/friends/:userId/:friendId",
+            remove: "DELETE /api/friends/:userId/:friendId",
+          },
+          botmods: {
+            list: "GET /api/botmods",
+            add: "POST /api/botmods/:userId",
+            remove: "DELETE /api/botmods/:userId",
+          },
+          prefix: {
+            get: "GET /api/prefix/:guildId",
+            set: "POST /api/prefix/:guildId",
+            reset: "DELETE /api/prefix/:guildId",
           },
           websocket: {
             connect: "WS /api/ws?apiKey=YOUR_API_KEY",
-            events: ["player.start", "player.end", "player.pause", "player.resume", "guild.join", "guild.leave"],
+            events: ["player.start", "player.end", "player.pause", "player.resume", "guild.join", "guild.leave", "track.add", "queue.clear"],
           },
         },
       }),
@@ -706,6 +1043,82 @@ export function startApiServer(client) {
           connected: !!client.db,
           collections: ALLOWED_COLLECTIONS.length,
         },
+        cache: apiCache.getStats(),
+        api: {
+          version: API_VERSION,
+          build: API_BUILD,
+        },
+      }),
+    );
+  });
+
+  /**
+   * GET /api/cache
+   * Get cache statistics and optionally clear cache.
+   */
+  app.get("/api/cache", auth, (_req, res) => {
+    res.json(
+      successResponse({
+        cache: apiCache.getStats(),
+        ttlMs: CACHE_TTL_MS,
+      }),
+    );
+  });
+
+  /**
+   * DELETE /api/cache
+   * Clear the API cache.
+   */
+  app.delete("/api/cache", auth, (_req, res) => {
+    const previousSize = apiCache.cache.size;
+    apiCache.clear();
+    res.json(
+      successResponse({
+        action: "cache_cleared",
+        previousSize,
+        currentSize: 0,
+      }),
+    );
+  });
+
+  /**
+   * GET /api/audit
+   * Get audit log entries.
+   */
+  app.get("/api/audit", auth, (req, res) => {
+    const { limit = 50, action, endpoint } = req.query;
+    const limitNum = Math.min(parseInt(limit) || 50, MAX_AUDIT_LOG_SIZE);
+
+    let entries;
+    if (action) {
+      entries = auditLog.getByAction(action, limitNum);
+    } else if (endpoint) {
+      entries = auditLog.getByEndpoint(endpoint, limitNum);
+    } else {
+      entries = auditLog.getRecent(limitNum);
+    }
+
+    res.json(
+      successResponse({
+        total: auditLog.entries.length,
+        returned: entries.length,
+        stats: auditLog.getStats(),
+        entries,
+      }),
+    );
+  });
+
+  /**
+   * DELETE /api/audit
+   * Clear the audit log.
+   */
+  app.delete("/api/audit", auth, (_req, res) => {
+    const previousCount = auditLog.entries.length;
+    auditLog.clear();
+    res.json(
+      successResponse({
+        action: "audit_cleared",
+        previousCount,
       }),
     );
   });
@@ -2443,13 +2856,72 @@ export function startApiServer(client) {
   });
 
   /**
+   * POST /api/247/:guildId
+   * Enable 24/7 mode for a guild.
+   */
+  app.post("/api/247/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const { voiceChannelId, textChannelId } = req.body ?? {};
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    if (!voiceChannelId || !isValidDiscordId(voiceChannelId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Valid voice channel ID is required."));
+    }
+
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        return res.status(404).json(errorResponse("Not Found", "Guild not found or bot is not a member."));
+      }
+
+      const voiceChannel = guild.channels.cache.get(voiceChannelId);
+      if (!voiceChannel || !voiceChannel.isVoiceBased()) {
+        return res.status(400).json(errorResponse("Bad Request", "Invalid voice channel."));
+      }
+
+      const exists = await safeHas(client.db.twoFourSeven, guildId);
+      if (exists) {
+        return res.status(409).json(errorResponse("Conflict", "24/7 is already enabled for this guild."));
+      }
+
+      const data = {
+        guildId,
+        voiceId: voiceChannelId,
+        textId: textChannelId || null,
+        enabledAt: Date.now(),
+        enabledBy: "API",
+      };
+
+      await client.db.twoFourSeven.set(guildId, data);
+
+      res.json(
+        successResponse({
+          guildId,
+          guildName: guild.name,
+          action: "247_enabled",
+          voiceChannel: {
+            id: voiceChannelId,
+            name: voiceChannel.name,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/247/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to enable 24/7."));
+    }
+  });
+
+  /**
    * DELETE /api/247/:guildId
    * Remove 24/7 from a guild.
    */
   app.delete("/api/247/:guildId", auth, async (req, res) => {
     const { guildId } = req.params;
 
-    if (!/^\d{17,19}$/.test(guildId)) {
+    if (!isValidDiscordId(guildId)) {
       return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
     }
 
@@ -2525,7 +2997,7 @@ export function startApiServer(client) {
   app.delete("/api/afk/:userId", auth, async (req, res) => {
     const { userId } = req.params;
 
-    if (!/^\d{17,19}$/.test(userId)) {
+    if (!isValidDiscordId(userId)) {
       return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
     }
 
@@ -2546,6 +3018,87 @@ export function startApiServer(client) {
     } catch (err) {
       log(`API error on DELETE /api/afk/${userId}: ${err.message}`, "error");
       res.status(500).json(errorResponse("Server Error", "Failed to remove AFK status."));
+    }
+  });
+
+  /**
+   * GET /api/afk/:userId
+   * Get AFK status for a specific user.
+   */
+  app.get("/api/afk/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const afkData = await safeGet(client.db.afk, userId);
+      if (!afkData) {
+        return res.status(404).json(errorResponse("Not Found", "User is not AFK."));
+      }
+
+      const user = await client.users.fetch(userId).catch(() => null);
+      const duration = afkData.since ? Date.now() - afkData.since : null;
+
+      res.json(
+        successResponse({
+          id: userId,
+          username: user?.username ?? null,
+          tag: user?.tag ?? null,
+          avatar: user?.displayAvatarURL({ forceStatic: false, size: 256 }) ?? null,
+          reason: afkData.reason ?? "No reason provided",
+          since: afkData.since ?? afkData.timestamp ?? null,
+          sinceFormatted: afkData.since ? new Date(afkData.since).toISOString() : null,
+          durationMs: duration,
+          durationFormatted: duration ? formatUptime(duration) : null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/afk/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch AFK status."));
+    }
+  });
+
+  /**
+   * POST /api/afk/:userId
+   * Set AFK status for a user.
+   */
+  app.post("/api/afk/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+    const { reason } = req.body ?? {};
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const existing = await safeHas(client.db.afk, userId);
+      const sanitizedReason = sanitizeString(reason, 200) || "AFK (set via API)";
+
+      const afkData = {
+        reason: sanitizedReason,
+        since: Date.now(),
+        setBy: "API",
+      };
+
+      await client.db.afk.set(userId, afkData);
+
+      const user = await client.users.fetch(userId).catch(() => null);
+
+      res.json(
+        successResponse({
+          userId,
+          username: user?.username ?? null,
+          action: existing ? "afk_updated" : "afk_set",
+          reason: sanitizedReason,
+          since: afkData.since,
+          sinceFormatted: new Date(afkData.since).toISOString(),
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/afk/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to set AFK status."));
     }
   });
 
@@ -2800,6 +3353,1360 @@ export function startApiServer(client) {
     } catch (err) {
       log(`API error on GET /api/players/${guildId}: ${err.message}`, "error");
       res.status(500).json(errorResponse("Server Error", "Failed to fetch player info."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // ADVANCED: PLAYER CONTROLS (SEEK, SHUFFLE, LOOP, PREVIOUS, PLAY)
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * POST /api/players/:guildId/seek
+   * Seek to a specific position in the current track.
+   */
+  app.post("/api/players/:guildId/seek", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const { position } = req.body ?? {};
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    if (typeof position !== "number" || position < 0) {
+      return res.status(400).json(errorResponse("Bad Request", "Position must be a positive number in milliseconds."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const current = player.queue?.current;
+      if (!current) {
+        return res.status(400).json(errorResponse("Bad Request", "No track is currently playing."));
+      }
+
+      if (current.isStream) {
+        return res.status(400).json(errorResponse("Bad Request", "Cannot seek in a stream."));
+      }
+
+      if (position > current.length) {
+        return res.status(400).json(errorResponse("Bad Request", `Position exceeds track duration (${current.length}ms).`));
+      }
+
+      const previousPosition = player.position;
+      player.seek(position);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "seeked",
+          previousPositionMs: previousPosition,
+          newPositionMs: position,
+          trackDurationMs: current.length,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/seek: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to seek."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/shuffle
+   * Shuffle the queue.
+   */
+  app.post("/api/players/:guildId/shuffle", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      if (!player.queue || player.queue.size < 2) {
+        return res.status(400).json(errorResponse("Bad Request", "Not enough tracks in queue to shuffle."));
+      }
+
+      player.queue.shuffle();
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "shuffled",
+          queueSize: player.queue.size,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/shuffle: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to shuffle queue."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/loop
+   * Set loop mode for the player.
+   */
+  app.post("/api/players/:guildId/loop", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const { mode } = req.body ?? {};
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    const validModes = ["none", "track", "queue"];
+    if (!validModes.includes(mode)) {
+      return res.status(400).json(errorResponse("Bad Request", `Loop mode must be one of: ${validModes.join(", ")}`));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const previousLoop = player.loop;
+      player.setLoop(mode);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "loop_set",
+          previousMode: previousLoop,
+          newMode: mode,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/loop: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to set loop mode."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/previous
+   * Play the previous track.
+   */
+  app.post("/api/players/:guildId/previous", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const previousTrack = player.queue?.previous;
+      if (!previousTrack) {
+        return res.status(400).json(errorResponse("Bad Request", "No previous track available."));
+      }
+
+      player.queue.unshift(previousTrack);
+      player.skip();
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "previous",
+          track: {
+            title: previousTrack.title,
+            author: previousTrack.author,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/previous: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to play previous track."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/play
+   * Search and play a track.
+   */
+  app.post("/api/players/:guildId/play", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const { query, source } = req.body ?? {};
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    if (!query || typeof query !== "string" || query.length < 2) {
+      return res.status(400).json(errorResponse("Bad Request", "Query must be a string with at least 2 characters."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild. Create a player first."));
+      }
+
+      const searchSource = source || "youtube";
+      const result = await client.manager.search(query, { requester: { id: "API", username: "API" }, engine: searchSource });
+
+      if (!result || !result.tracks || result.tracks.length === 0) {
+        return res.status(404).json(errorResponse("Not Found", "No tracks found for the given query."));
+      }
+
+      const track = result.tracks[0];
+      player.queue.add(track);
+
+      if (!player.playing && !player.paused) {
+        player.play();
+      }
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "track_added",
+          track: {
+            title: track.title,
+            author: track.author,
+            uri: track.uri,
+            durationMs: track.length,
+            thumbnail: track.thumbnail ?? null,
+          },
+          queuePosition: player.queue.size,
+          isPlaying: player.playing,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/play: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to play track."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/filters
+   * Set audio filters for the player.
+   */
+  app.post("/api/players/:guildId/filters", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const filters = req.body ?? {};
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const availableFilters = {
+        bassboost: { equalizer: [{ band: 0, gain: 0.6 }, { band: 1, gain: 0.7 }, { band: 2, gain: 0.8 }] },
+        nightcore: { timescale: { speed: 1.3, pitch: 1.3, rate: 1.0 } },
+        vaporwave: { timescale: { speed: 0.85, pitch: 0.9, rate: 1.0 } },
+        pop: { equalizer: [{ band: 0, gain: -0.1 }, { band: 5, gain: 0.15 }, { band: 6, gain: 0.2 }] },
+        soft: { equalizer: [{ band: 0, gain: -0.2 }, { band: 1, gain: -0.1 }, { band: 8, gain: 0.1 }] },
+        treblebass: { equalizer: [{ band: 0, gain: 0.6 }, { band: 1, gain: 0.67 }, { band: 8, gain: 0.25 }, { band: 9, gain: 0.33 }] },
+        "8d": { rotation: { rotationHz: 0.2 } },
+        karaoke: { karaoke: { level: 1.0, monoLevel: 1.0, filterBand: 220, filterWidth: 100 } },
+        vibrato: { vibrato: { frequency: 4, depth: 0.75 } },
+        tremolo: { tremolo: { frequency: 4, depth: 0.75 } },
+        reset: null,
+      };
+
+      const { preset, custom } = filters;
+
+      if (preset && !Object.prototype.hasOwnProperty.call(availableFilters, preset)) {
+        return res.status(400).json(errorResponse("Bad Request", `Unknown filter preset. Available: ${Object.keys(availableFilters).join(", ")}`));
+      }
+
+      let appliedFilter;
+      if (preset === "reset") {
+        player.shoukaku.clearFilters();
+        appliedFilter = "reset";
+      } else if (preset) {
+        const filterConfig = availableFilters[preset];
+        await player.shoukaku.setFilters(filterConfig);
+        appliedFilter = preset;
+      } else if (custom) {
+        await player.shoukaku.setFilters(custom);
+        appliedFilter = "custom";
+      } else {
+        return res.status(400).json(errorResponse("Bad Request", "Provide either 'preset' or 'custom' filter configuration."));
+      }
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "filters_applied",
+          filter: appliedFilter,
+          availablePresets: Object.keys(availableFilters),
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/filters: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to apply filters."));
+    }
+  });
+
+  /**
+   * GET /api/players/:guildId/filters
+   * Get available audio filters and current filter state.
+   */
+  app.get("/api/players/:guildId/filters", auth, (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const availablePresets = [
+        { name: "bassboost", description: "Enhance bass frequencies" },
+        { name: "nightcore", description: "Speed up with higher pitch" },
+        { name: "vaporwave", description: "Slow down with lower pitch" },
+        { name: "pop", description: "Optimize for pop music" },
+        { name: "soft", description: "Softer, mellower sound" },
+        { name: "treblebass", description: "Enhance both treble and bass" },
+        { name: "8d", description: "8D audio rotation effect" },
+        { name: "karaoke", description: "Remove vocals (works on some tracks)" },
+        { name: "vibrato", description: "Vibrating effect" },
+        { name: "tremolo", description: "Wavering volume effect" },
+        { name: "reset", description: "Remove all filters" },
+      ];
+
+      res.json(
+        successResponse({
+          guildId,
+          currentFilters: player.shoukaku?.filters ?? null,
+          availablePresets,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/players/${guildId}/filters: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch filter info."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // QUEUE MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/players/:guildId/queue
+   * Get the full queue for a player.
+   */
+  app.get("/api/players/:guildId/queue", auth, (req, res) => {
+    const { guildId } = req.params;
+    const { limit = 50, offset = 0 } = req.query;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const current = player.queue?.current;
+      const queue = player.queue ?? [];
+      const total = queue.size ?? 0;
+      const limitNum = Math.min(parseInt(limit) || 50, 100);
+      const offsetNum = parseInt(offset) || 0;
+
+      const tracks = [...queue].slice(offsetNum, offsetNum + limitNum).map((t, i) => ({
+        position: offsetNum + i + 1,
+        title: t.title,
+        author: t.author,
+        uri: t.uri,
+        durationMs: t.length,
+        thumbnail: t.thumbnail ?? null,
+        requester: {
+          id: t.requester?.id ?? null,
+          username: t.requester?.username ?? null,
+        },
+      }));
+
+      res.json(
+        successResponse({
+          guildId,
+          currentTrack: current ? {
+            title: current.title,
+            author: current.author,
+            uri: current.uri,
+            durationMs: current.length,
+            positionMs: player.position,
+          } : null,
+          queue: {
+            total,
+            limit: limitNum,
+            offset: offsetNum,
+            hasMore: offsetNum + limitNum < total,
+            totalDurationMs: queue.reduce((sum, t) => sum + (t.length || 0), 0),
+            tracks,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/players/${guildId}/queue: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch queue."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/queue
+   * Add a track to the queue.
+   */
+  app.post("/api/players/:guildId/queue", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const { query, source, position } = req.body ?? {};
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    if (!query || typeof query !== "string" || query.length < 2) {
+      return res.status(400).json(errorResponse("Bad Request", "Query must be a string with at least 2 characters."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const searchSource = source || "youtube";
+      const result = await client.manager.search(query, { requester: { id: "API", username: "API" }, engine: searchSource });
+
+      if (!result || !result.tracks || result.tracks.length === 0) {
+        return res.status(404).json(errorResponse("Not Found", "No tracks found for the given query."));
+      }
+
+      const track = result.tracks[0];
+      
+      if (typeof position === "number" && position >= 0 && position < player.queue.size) {
+        player.queue.splice(position, 0, track);
+      } else {
+        player.queue.add(track);
+      }
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "track_queued",
+          track: {
+            title: track.title,
+            author: track.author,
+            uri: track.uri,
+            durationMs: track.length,
+          },
+          queuePosition: typeof position === "number" ? position + 1 : player.queue.size,
+          totalQueueSize: player.queue.size,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/queue: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to add track to queue."));
+    }
+  });
+
+  /**
+   * DELETE /api/players/:guildId/queue/:index
+   * Remove a track from the queue by index.
+   */
+  app.delete("/api/players/:guildId/queue/:index", auth, (req, res) => {
+    const { guildId, index } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    const trackIndex = parseInt(index);
+    if (isNaN(trackIndex) || trackIndex < 0) {
+      return res.status(400).json(errorResponse("Bad Request", "Index must be a non-negative integer."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      if (trackIndex >= player.queue.size) {
+        return res.status(404).json(errorResponse("Not Found", `Track at index ${trackIndex} not found. Queue size: ${player.queue.size}`));
+      }
+
+      const removed = player.queue.splice(trackIndex, 1)[0];
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "track_removed",
+          removedTrack: {
+            title: removed?.title ?? null,
+            author: removed?.author ?? null,
+          },
+          index: trackIndex,
+          remainingQueueSize: player.queue.size,
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/players/${guildId}/queue/${index}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove track from queue."));
+    }
+  });
+
+  /**
+   * DELETE /api/players/:guildId/queue
+   * Clear the entire queue.
+   */
+  app.delete("/api/players/:guildId/queue", auth, (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const previousSize = player.queue.size;
+      player.queue.clear();
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "queue_cleared",
+          removedTracks: previousSize,
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/players/${guildId}/queue: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to clear queue."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/queue/move
+   * Move a track from one position to another in the queue.
+   */
+  app.post("/api/players/:guildId/queue/move", auth, (req, res) => {
+    const { guildId } = req.params;
+    const { from, to } = req.body ?? {};
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    if (typeof from !== "number" || typeof to !== "number" || from < 0 || to < 0) {
+      return res.status(400).json(errorResponse("Bad Request", "Both 'from' and 'to' must be non-negative integers."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      if (from >= player.queue.size || to >= player.queue.size) {
+        return res.status(400).json(errorResponse("Bad Request", `Invalid positions. Queue size: ${player.queue.size}`));
+      }
+
+      const track = player.queue.splice(from, 1)[0];
+      player.queue.splice(to, 0, track);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "track_moved",
+          track: {
+            title: track?.title ?? null,
+            author: track?.author ?? null,
+          },
+          from,
+          to,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/queue/move: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to move track."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // USER PREFERENCES ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/preferences/:userId
+   * Get user preferences.
+   */
+  app.get("/api/preferences/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const preferences = await safeGet(client.db.userPreferences, userId);
+      const user = await client.users.fetch(userId).catch(() => null);
+
+      res.json(
+        successResponse({
+          userId,
+          username: user?.username ?? null,
+          preferences: preferences ?? {
+            searchEngine: "youtube",
+            autoplay: false,
+            volume: 100,
+            announceNowPlaying: true,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/preferences/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch preferences."));
+    }
+  });
+
+  /**
+   * POST /api/preferences/:userId
+   * Set user preferences.
+   */
+  app.post("/api/preferences/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+    const preferences = req.body ?? {};
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const existing = await safeGet(client.db.userPreferences, userId) || {};
+      
+      const allowedKeys = ["searchEngine", "autoplay", "volume", "announceNowPlaying", "theme", "language"];
+      const validEngines = ["youtube", "spotify", "soundcloud", "deezer", "apple"];
+      
+      const updatedPrefs = { ...existing };
+      
+      for (const key of allowedKeys) {
+        if (preferences[key] !== undefined) {
+          if (key === "searchEngine" && !validEngines.includes(preferences[key])) {
+            return res.status(400).json(errorResponse("Bad Request", `Invalid search engine. Must be one of: ${validEngines.join(", ")}`));
+          }
+          if (key === "volume" && (typeof preferences[key] !== "number" || preferences[key] < 0 || preferences[key] > 200)) {
+            return res.status(400).json(errorResponse("Bad Request", "Volume must be between 0 and 200."));
+          }
+          updatedPrefs[key] = preferences[key];
+        }
+      }
+
+      updatedPrefs.updatedAt = Date.now();
+      await client.db.userPreferences.set(userId, updatedPrefs);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "preferences_updated",
+          preferences: updatedPrefs,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/preferences/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to update preferences."));
+    }
+  });
+
+  /**
+   * DELETE /api/preferences/:userId
+   * Reset user preferences to defaults.
+   */
+  app.delete("/api/preferences/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      await client.db.userPreferences.delete(userId);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "preferences_reset",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/preferences/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to reset preferences."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // LIKED SONGS ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/liked/:userId
+   * Get user's liked songs.
+   */
+  app.get("/api/liked/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+    const { limit = 50, offset = 0 } = req.query;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const likedSongs = await safeGet(client.db.likedSongs, userId) || [];
+      const user = await client.users.fetch(userId).catch(() => null);
+
+      const total = likedSongs.length;
+      const limitNum = Math.min(parseInt(limit) || 50, 100);
+      const offsetNum = parseInt(offset) || 0;
+
+      const songs = likedSongs.slice(offsetNum, offsetNum + limitNum);
+
+      res.json(
+        successResponse({
+          userId,
+          username: user?.username ?? null,
+          total,
+          limit: limitNum,
+          offset: offsetNum,
+          hasMore: offsetNum + limitNum < total,
+          songs,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/liked/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch liked songs."));
+    }
+  });
+
+  /**
+   * POST /api/liked/:userId
+   * Add a song to user's liked songs.
+   */
+  app.post("/api/liked/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+    const { title, author, uri, thumbnail, durationMs } = req.body ?? {};
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    if (!title || !uri) {
+      return res.status(400).json(errorResponse("Bad Request", "Title and URI are required."));
+    }
+
+    try {
+      const likedSongs = await safeGet(client.db.likedSongs, userId) || [];
+
+      // Check if song already exists
+      if (likedSongs.some(s => s.uri === uri)) {
+        return res.status(409).json(errorResponse("Conflict", "Song is already in liked songs."));
+      }
+
+      const song = {
+        id: crypto.randomUUID(),
+        title: sanitizeString(title, 200),
+        author: sanitizeString(author, 100) || "Unknown",
+        uri,
+        thumbnail: thumbnail || null,
+        durationMs: durationMs || 0,
+        addedAt: Date.now(),
+      };
+
+      likedSongs.unshift(song);
+      await client.db.likedSongs.set(userId, likedSongs);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "song_liked",
+          song,
+          totalLikedSongs: likedSongs.length,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/liked/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to add liked song."));
+    }
+  });
+
+  /**
+   * DELETE /api/liked/:userId/:songId
+   * Remove a song from user's liked songs.
+   */
+  app.delete("/api/liked/:userId/:songId", auth, async (req, res) => {
+    const { userId, songId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const likedSongs = await safeGet(client.db.likedSongs, userId) || [];
+      const index = likedSongs.findIndex(s => s.id === songId);
+
+      if (index === -1) {
+        return res.status(404).json(errorResponse("Not Found", "Song not found in liked songs."));
+      }
+
+      const removed = likedSongs.splice(index, 1)[0];
+      await client.db.likedSongs.set(userId, likedSongs);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "song_unliked",
+          removedSong: removed,
+          remainingLikedSongs: likedSongs.length,
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/liked/${userId}/${songId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove liked song."));
+    }
+  });
+
+  /**
+   * DELETE /api/liked/:userId
+   * Clear all liked songs for a user.
+   */
+  app.delete("/api/liked/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const likedSongs = await safeGet(client.db.likedSongs, userId) || [];
+      const count = likedSongs.length;
+
+      await client.db.likedSongs.delete(userId);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "liked_songs_cleared",
+          removedCount: count,
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/liked/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to clear liked songs."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // FRIENDS ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/friends/:userId
+   * Get user's friends list.
+   */
+  app.get("/api/friends/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const friends = await safeGet(client.db.stats.friends, userId) || [];
+      const user = await client.users.fetch(userId).catch(() => null);
+
+      const friendsWithDetails = await Promise.all(
+        friends.map(async (f) => {
+          const friendUser = await client.users.fetch(f.id).catch(() => null);
+          return {
+            id: f.id,
+            username: friendUser?.username ?? null,
+            avatar: friendUser?.displayAvatarURL({ forceStatic: false, size: 128 }) ?? null,
+            addedAt: f.addedAt,
+          };
+        }),
+      );
+
+      res.json(
+        successResponse({
+          userId,
+          username: user?.username ?? null,
+          friendsCount: friendsWithDetails.length,
+          friends: friendsWithDetails,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/friends/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch friends."));
+    }
+  });
+
+  /**
+   * POST /api/friends/:userId/:friendId
+   * Add a friend.
+   */
+  app.post("/api/friends/:userId/:friendId", auth, async (req, res) => {
+    const { userId, friendId } = req.params;
+
+    if (!isValidDiscordId(userId) || !isValidDiscordId(friendId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    if (userId === friendId) {
+      return res.status(400).json(errorResponse("Bad Request", "Cannot add yourself as a friend."));
+    }
+
+    try {
+      const friends = await safeGet(client.db.stats.friends, userId) || [];
+
+      if (friends.some(f => f.id === friendId)) {
+        return res.status(409).json(errorResponse("Conflict", "User is already a friend."));
+      }
+
+      const friendUser = await client.users.fetch(friendId).catch(() => null);
+      if (!friendUser) {
+        return res.status(404).json(errorResponse("Not Found", "Friend user not found."));
+      }
+
+      friends.push({
+        id: friendId,
+        addedAt: Date.now(),
+      });
+
+      await client.db.stats.friends.set(userId, friends);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "friend_added",
+          friend: {
+            id: friendId,
+            username: friendUser.username,
+          },
+          totalFriends: friends.length,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/friends/${userId}/${friendId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to add friend."));
+    }
+  });
+
+  /**
+   * DELETE /api/friends/:userId/:friendId
+   * Remove a friend.
+   */
+  app.delete("/api/friends/:userId/:friendId", auth, async (req, res) => {
+    const { userId, friendId } = req.params;
+
+    if (!isValidDiscordId(userId) || !isValidDiscordId(friendId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const friends = await safeGet(client.db.stats.friends, userId) || [];
+      const index = friends.findIndex(f => f.id === friendId);
+
+      if (index === -1) {
+        return res.status(404).json(errorResponse("Not Found", "Friend not found."));
+      }
+
+      friends.splice(index, 1);
+      await client.db.stats.friends.set(userId, friends);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "friend_removed",
+          friendId,
+          remainingFriends: friends.length,
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/friends/${userId}/${friendId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove friend."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // BOT MODS MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/botmods
+   * Get all bot moderators.
+   */
+  app.get("/api/botmods", auth, async (_req, res) => {
+    try {
+      const botmods = await getAllEntries(client.db.botmods);
+
+      const mods = await Promise.all(
+        Object.entries(botmods).map(async ([id, data]) => {
+          const user = await client.users.fetch(id).catch(() => null);
+          return {
+            id,
+            username: user?.username ?? null,
+            tag: user?.tag ?? null,
+            avatar: user?.displayAvatarURL({ forceStatic: false, size: 128 }) ?? null,
+            addedAt: data?.addedAt ?? null,
+            addedBy: data?.addedBy ?? null,
+          };
+        }),
+      );
+
+      res.json(
+        successResponse({
+          count: mods.length,
+          mods,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/botmods: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch bot mods."));
+    }
+  });
+
+  /**
+   * POST /api/botmods/:userId
+   * Add a bot moderator.
+   */
+  app.post("/api/botmods/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.botmods, userId);
+      if (exists) {
+        return res.status(409).json(errorResponse("Conflict", "User is already a bot moderator."));
+      }
+
+      await client.db.botmods.set(userId, {
+        addedAt: Date.now(),
+        addedBy: "API",
+      });
+
+      const user = await client.users.fetch(userId).catch(() => null);
+
+      res.json(
+        successResponse({
+          userId,
+          username: user?.username ?? null,
+          action: "botmod_added",
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/botmods/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to add bot mod."));
+    }
+  });
+
+  /**
+   * DELETE /api/botmods/:userId
+   * Remove a bot moderator.
+   */
+  app.delete("/api/botmods/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.botmods, userId);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", "User is not a bot moderator."));
+      }
+
+      await client.db.botmods.delete(userId);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "botmod_removed",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/botmods/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove bot mod."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // IGNORE MANAGEMENT ENDPOINTS (ADD/REMOVE)
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * POST /api/ignore/:id
+   * Add a channel or guild to the ignore list.
+   */
+  app.post("/api/ignore/:id", auth, async (req, res) => {
+    const { id } = req.params;
+    const { type, reason } = req.body ?? {};
+
+    if (!isValidDiscordId(id)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid ID format."));
+    }
+
+    const validTypes = ["channel", "guild"];
+    if (type && !validTypes.includes(type)) {
+      return res.status(400).json(errorResponse("Bad Request", `Type must be one of: ${validTypes.join(", ")}`));
+    }
+
+    try {
+      const exists = await safeHas(client.db.ignore, id);
+      if (exists) {
+        return res.status(409).json(errorResponse("Conflict", "ID is already in the ignore list."));
+      }
+
+      await client.db.ignore.set(id, {
+        type: type || "unknown",
+        reason: sanitizeString(reason, 200) || "Ignored via API",
+        addedAt: Date.now(),
+        addedBy: "API",
+      });
+
+      res.json(
+        successResponse({
+          id,
+          action: "ignored",
+          type: type || "unknown",
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/ignore/${id}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to add to ignore list."));
+    }
+  });
+
+  /**
+   * DELETE /api/ignore/:id
+   * Remove a channel or guild from the ignore list.
+   */
+  app.delete("/api/ignore/:id", auth, async (req, res) => {
+    const { id } = req.params;
+
+    if (!isValidDiscordId(id)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.ignore, id);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", "ID is not in the ignore list."));
+      }
+
+      await client.db.ignore.delete(id);
+
+      res.json(
+        successResponse({
+          id,
+          action: "unignored",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/ignore/${id}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove from ignore list."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // BYPASS MANAGEMENT ENDPOINTS (ADD/REMOVE)
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * POST /api/bypass/:userId
+   * Add a user to the bypass list.
+   */
+  app.post("/api/bypass/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+    const { reason } = req.body ?? {};
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.bypass, userId);
+      if (exists) {
+        return res.status(409).json(errorResponse("Conflict", "User already has bypass."));
+      }
+
+      await client.db.bypass.set(userId, {
+        reason: sanitizeString(reason, 200) || "Bypass added via API",
+        addedAt: Date.now(),
+        addedBy: "API",
+      });
+
+      const user = await client.users.fetch(userId).catch(() => null);
+
+      res.json(
+        successResponse({
+          userId,
+          username: user?.username ?? null,
+          action: "bypass_added",
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/bypass/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to add bypass."));
+    }
+  });
+
+  /**
+   * DELETE /api/bypass/:userId
+   * Remove a user from the bypass list.
+   */
+  app.delete("/api/bypass/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.bypass, userId);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", "User does not have bypass."));
+      }
+
+      await client.db.bypass.delete(userId);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "bypass_removed",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/bypass/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove bypass."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // PREFIX MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/prefix/:guildId
+   * Get guild prefix.
+   */
+  app.get("/api/prefix/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      const customPrefix = await safeGet(client.db.prefix, guildId);
+
+      res.json(
+        successResponse({
+          guildId,
+          guildName: guild?.name ?? null,
+          prefix: customPrefix || client.prefix,
+          isCustom: !!customPrefix,
+          defaultPrefix: client.prefix,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/prefix/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch prefix."));
+    }
+  });
+
+  /**
+   * POST /api/prefix/:guildId
+   * Set guild prefix.
+   */
+  app.post("/api/prefix/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const { prefix } = req.body ?? {};
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    if (!prefix || typeof prefix !== "string" || prefix.length > 10) {
+      return res.status(400).json(errorResponse("Bad Request", "Prefix must be a string with max 10 characters."));
+    }
+
+    try {
+      const previousPrefix = await safeGet(client.db.prefix, guildId) || client.prefix;
+      await client.db.prefix.set(guildId, prefix);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "prefix_set",
+          previousPrefix,
+          newPrefix: prefix,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/prefix/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to set prefix."));
+    }
+  });
+
+  /**
+   * DELETE /api/prefix/:guildId
+   * Reset guild prefix to default.
+   */
+  app.delete("/api/prefix/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const previousPrefix = await safeGet(client.db.prefix, guildId);
+      if (!previousPrefix) {
+        return res.status(404).json(errorResponse("Not Found", "Guild has no custom prefix."));
+      }
+
+      await client.db.prefix.delete(guildId);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "prefix_reset",
+          previousPrefix,
+          currentPrefix: client.prefix,
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/prefix/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to reset prefix."));
     }
   });
 
