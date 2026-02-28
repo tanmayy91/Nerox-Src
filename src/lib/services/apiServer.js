@@ -30,6 +30,7 @@ const API_BUILD = "2024.12.ULTRA";
 const RATE_LIMIT_CLEANUP_BUFFER_MS = 60000;
 const CACHE_TTL_MS = 30000; // 30 seconds cache
 const MAX_AUDIT_LOG_SIZE = 500;
+const ACTIVITY_PER_LEVEL = 50; // Activity points needed per level
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ADVANCED CACHING SYSTEM
@@ -967,7 +968,9 @@ export function startApiServer(client) {
             remove: "DELETE /api/afk/:userId",
           },
           players: {
+            list: "GET /api/players",
             get: "GET /api/players/:guildId",
+            nowplaying: "GET /api/players/:guildId/nowplaying",
             pause: "POST /api/players/:guildId/pause",
             resume: "POST /api/players/:guildId/resume",
             skip: "POST /api/players/:guildId/skip",
@@ -1006,6 +1009,10 @@ export function startApiServer(client) {
             list: "GET /api/friends/:userId",
             add: "POST /api/friends/:userId/:friendId",
             remove: "DELETE /api/friends/:userId/:friendId",
+          },
+          stats: {
+            user: "GET /api/stats/user/:userId",
+            guild: "GET /api/stats/guild/:guildId",
           },
           botmods: {
             list: "GET /api/botmods",
@@ -3086,6 +3093,114 @@ export function startApiServer(client) {
   // ══════════════════════════════════════════════════════════════════════════════
 
   /**
+   * GET /api/players
+   * Get all active players across all guilds.
+   */
+  app.get("/api/players", auth, (_req, res) => {
+    try {
+      const players = client.manager?.players;
+      if (!players || players.size === 0) {
+        return res.json(
+          successResponse({
+            count: 0,
+            players: [],
+          }),
+        );
+      }
+
+      const playersList = [];
+      for (const [guildId, player] of players) {
+        const guild = client.guilds.cache.get(guildId);
+        const current = player.queue?.current;
+        playersList.push({
+          guildId,
+          guildName: guild?.name ?? null,
+          playing: player.playing,
+          paused: player.paused,
+          volume: player.volume,
+          queueSize: player.queue?.size ?? 0,
+          currentTrack: current ? {
+            title: current.title,
+            author: current.author,
+            durationMs: current.length,
+          } : null,
+          voiceChannelId: player.voiceId,
+          textChannelId: player.textId,
+        });
+      }
+
+      res.json(
+        successResponse({
+          count: playersList.length,
+          players: playersList,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/players: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch players."));
+    }
+  });
+
+  /**
+   * GET /api/players/:guildId/nowplaying
+   * Get the currently playing track in a guild.
+   */
+  app.get("/api/players/:guildId/nowplaying", auth, (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const current = player.queue?.current;
+      if (!current) {
+        return res.status(404).json(errorResponse("Not Found", "No track is currently playing."));
+      }
+
+      const guild = client.guilds.cache.get(guildId);
+
+      res.json(
+        successResponse({
+          guildId,
+          guildName: guild?.name ?? null,
+          playing: player.playing,
+          paused: player.paused,
+          track: {
+            title: current.title,
+            author: current.author,
+            uri: current.uri,
+            durationMs: current.length,
+            durationFormatted: client.formatDuration(current.length),
+            positionMs: player.position,
+            positionFormatted: client.formatDuration(player.position),
+            progressPercent: current.length > 0 ? Math.round((player.position / current.length) * 100) : 0,
+            thumbnail: current.thumbnail ?? null,
+            isStream: current.isStream,
+            sourceName: current.sourceName ?? null,
+            requester: {
+              id: current.requester?.id ?? null,
+              username: current.requester?.username ?? null,
+            },
+          },
+          volume: player.volume,
+          loop: player.loop,
+          autoplay: player.data?.get("autoplayStatus") ?? false,
+          queueSize: player.queue?.size ?? 0,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/players/${guildId}/nowplaying: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch now playing."));
+    }
+  });
+
+  /**
    * POST /api/players/:guildId/pause
    * Pause the player in a guild.
    */
@@ -4370,6 +4485,111 @@ export function startApiServer(client) {
     } catch (err) {
       log(`API error on DELETE /api/friends/${userId}/${friendId}: ${err.message}`, "error");
       res.status(500).json(errorResponse("Server Error", "Failed to remove friend."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // USER STATS ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/stats/user/:userId
+   * Get user statistics (commands used, songs played, etc.)
+   */
+  app.get("/api/stats/user/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const [commandsUsed, songsPlayed, likedSongs, friends, premiumData] = await Promise.all([
+        safeGet(client.db.stats.commandsUsed, userId),
+        safeGet(client.db.stats.songsPlayed, userId),
+        safeGet(client.db.likedSongs, userId),
+        safeGet(client.db.stats.friends, userId),
+        safeGet(client.db.botstaff, userId),
+      ]);
+
+      const user = await client.users.fetch(userId).catch(() => null);
+
+      // Calculate level based on activity
+      const totalActivity = (commandsUsed ?? 0) + (songsPlayed ?? 0);
+      const level = Math.floor(totalActivity / ACTIVITY_PER_LEVEL) + 1;
+
+      res.json(
+        successResponse({
+          userId,
+          username: user?.username ?? null,
+          avatar: user?.displayAvatarURL({ forceStatic: false, size: 256 }) ?? null,
+          stats: {
+            commandsUsed: commandsUsed ?? 0,
+            songsPlayed: songsPlayed ?? 0,
+            likedSongsCount: Array.isArray(likedSongs) ? likedSongs.length : 0,
+            friendsCount: Array.isArray(friends) ? friends.length : 0,
+            level,
+            totalActivity,
+          },
+          premium: premiumData ? {
+            active: true,
+            expiresAt: premiumData.expiresAt ?? null,
+            permanent: premiumData.permanent ?? false,
+          } : null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/stats/user/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch user stats."));
+    }
+  });
+
+  /**
+   * GET /api/stats/guild/:guildId
+   * Get guild statistics (commands used, songs played, etc.)
+   */
+  app.get("/api/stats/guild/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const [commandsUsed, songsPlayed, premiumData, prefix, is247] = await Promise.all([
+        safeGet(client.db.stats.commandsUsed, guildId),
+        safeGet(client.db.stats.songsPlayed, guildId),
+        safeGet(client.db.serverstaff, guildId),
+        safeGet(client.db.prefix, guildId),
+        safeHas(client.db.twoFourSeven, guildId),
+      ]);
+
+      const guild = client.guilds.cache.get(guildId);
+
+      res.json(
+        successResponse({
+          guildId,
+          guildName: guild?.name ?? null,
+          icon: guild?.iconURL({ forceStatic: false, size: 256 }) ?? null,
+          memberCount: guild?.memberCount ?? null,
+          stats: {
+            commandsUsed: commandsUsed ?? 0,
+            songsPlayed: songsPlayed ?? 0,
+          },
+          settings: {
+            prefix: prefix ?? client.prefix,
+            is247,
+          },
+          premium: premiumData ? {
+            active: true,
+            expiresAt: premiumData.expiresAt ?? premiumData.expires ?? null,
+            permanent: premiumData.permanent ?? false,
+          } : null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/stats/guild/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch guild stats."));
     }
   });
 
