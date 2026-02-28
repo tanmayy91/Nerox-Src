@@ -182,9 +182,10 @@ const ALLOWED_COLLECTIONS = [
 ];
 
 /**
- * Read-only collections that cannot be modified via API.
+ * Read-only collections that cannot be modified via generic database API.
+ * These collections have dedicated endpoints for management.
  */
-const READ_ONLY_COLLECTIONS = ["config", "stats/songsPlayed", "stats/commandsUsed"];
+const READ_ONLY_COLLECTIONS = ["config", "stats/songsPlayed", "stats/commandsUsed", "stats/friends"];
 
 /**
  * Sensitive collections that require extra validation.
