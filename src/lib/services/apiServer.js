@@ -274,6 +274,65 @@ function errorResponse(error, message) {
  *   GET /api/kpi/premium               → Premium users and servers
  *   GET /api/kpi/commands              → Command statistics
  *
+ * Bot:
+ *   GET /api/bot/info                  → Bot information (username, avatar, etc.)
+ *   GET /api/bot/maintenance           → Get maintenance mode status
+ *   POST /api/bot/maintenance          → Toggle maintenance mode
+ *
+ * Lavalink:
+ *   GET /api/lavalink/nodes            → Lavalink nodes status
+ *
+ * Users:
+ *   GET /api/users/:userId             → Look up user by ID
+ *
+ * Guilds:
+ *   GET /api/guilds/:guildId           → Look up guild by ID
+ *
+ * Blacklist:
+ *   GET /api/blacklist                 → Get all blacklisted users
+ *   POST /api/blacklist/:userId        → Add user to blacklist
+ *   DELETE /api/blacklist/:userId      → Remove user from blacklist
+ *
+ * Ignore:
+ *   GET /api/ignore                    → Get all ignored channels/guilds
+ *
+ * Bypass:
+ *   GET /api/bypass                    → Get all users with bypass permissions
+ *
+ * Premium Management:
+ *   GET /api/premium/users             → Get all premium users
+ *   POST /api/premium/users/:userId    → Add premium to user
+ *   DELETE /api/premium/users/:userId  → Remove premium from user
+ *   GET /api/premium/guilds            → Get all premium guilds
+ *   POST /api/premium/guilds/:guildId  → Add premium to guild
+ *   DELETE /api/premium/guilds/:guildId → Remove premium from guild
+ *
+ * No-Prefix:
+ *   GET /api/noprefix                  → Get all no-prefix users
+ *   POST /api/noprefix/:userId         → Add no-prefix to user
+ *   DELETE /api/noprefix/:userId       → Remove no-prefix from user
+ *
+ * Redeem Codes:
+ *   GET /api/redeem                    → Get all redeem codes
+ *   POST /api/redeem                   → Generate new redeem code
+ *   DELETE /api/redeem/:code           → Delete redeem code
+ *
+ * 24/7 Players:
+ *   GET /api/247                       → Get all 24/7 enabled guilds
+ *   DELETE /api/247/:guildId           → Remove 24/7 from guild
+ *
+ * AFK:
+ *   GET /api/afk                       → Get all AFK users
+ *   DELETE /api/afk/:userId            → Remove AFK status
+ *
+ * Player Controls:
+ *   GET /api/players/:guildId          → Get detailed player info
+ *   POST /api/players/:guildId/pause   → Pause player
+ *   POST /api/players/:guildId/resume  → Resume player
+ *   POST /api/players/:guildId/skip    → Skip track
+ *   POST /api/players/:guildId/stop    → Stop player
+ *   POST /api/players/:guildId/volume  → Set volume
+ *
  * @param {import("../../bot/structures/client.js").ExtendedClient} client
  */
 export function startApiServer(client) {
@@ -307,7 +366,7 @@ export function startApiServer(client) {
     res.json(
       successResponse({
         name: "Nerox Bot API",
-        version: "2.0.0",
+        version: "4.0.0",
         authentication: {
           method: "API Key",
           header: "x-api-key (recommended)",
@@ -334,6 +393,69 @@ export function startApiServer(client) {
             stats: "GET /api/kpi/stats",
             premium: "GET /api/kpi/premium",
             commands: "GET /api/kpi/commands",
+          },
+          bot: {
+            info: "GET /api/bot/info",
+            getMaintenance: "GET /api/bot/maintenance",
+            setMaintenance: "POST /api/bot/maintenance",
+          },
+          lavalink: {
+            nodes: "GET /api/lavalink/nodes",
+          },
+          users: {
+            lookup: "GET /api/users/:userId",
+          },
+          guilds: {
+            lookup: "GET /api/guilds/:guildId",
+          },
+          blacklist: {
+            list: "GET /api/blacklist",
+            add: "POST /api/blacklist/:userId",
+            remove: "DELETE /api/blacklist/:userId",
+          },
+          ignore: {
+            list: "GET /api/ignore",
+          },
+          bypass: {
+            list: "GET /api/bypass",
+          },
+          premium: {
+            users: {
+              list: "GET /api/premium/users",
+              add: "POST /api/premium/users/:userId",
+              remove: "DELETE /api/premium/users/:userId",
+            },
+            guilds: {
+              list: "GET /api/premium/guilds",
+              add: "POST /api/premium/guilds/:guildId",
+              remove: "DELETE /api/premium/guilds/:guildId",
+            },
+          },
+          noprefix: {
+            list: "GET /api/noprefix",
+            add: "POST /api/noprefix/:userId",
+            remove: "DELETE /api/noprefix/:userId",
+          },
+          redeem: {
+            list: "GET /api/redeem",
+            create: "POST /api/redeem",
+            delete: "DELETE /api/redeem/:code",
+          },
+          twoFourSeven: {
+            list: "GET /api/247",
+            remove: "DELETE /api/247/:guildId",
+          },
+          afk: {
+            list: "GET /api/afk",
+            remove: "DELETE /api/afk/:userId",
+          },
+          players: {
+            get: "GET /api/players/:guildId",
+            pause: "POST /api/players/:guildId/pause",
+            resume: "POST /api/players/:guildId/resume",
+            skip: "POST /api/players/:guildId/skip",
+            stop: "POST /api/players/:guildId/stop",
+            volume: "POST /api/players/:guildId/volume",
           },
         },
       }),
@@ -1024,6 +1146,1312 @@ export function startApiServer(client) {
     } catch (err) {
       log(`API error on GET /api/kpi/commands: ${err.message}`, "error");
       res.status(500).json(errorResponse("Server Error", "Failed to fetch command data."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // BOT INFO ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/bot/info
+   * Bot information (username, avatar, id, etc.)
+   */
+  app.get("/api/bot/info", auth, (_req, res) => {
+    try {
+      const user = client.user;
+      res.json(
+        successResponse({
+          id: user.id,
+          username: user.username,
+          discriminator: user.discriminator,
+          tag: user.tag,
+          avatar: user.displayAvatarURL({ forceStatic: false, size: 1024 }),
+          banner: user.bannerURL({ forceStatic: false, size: 1024 }),
+          createdAt: user.createdAt,
+          createdTimestamp: user.createdTimestamp,
+          verified: user.verified,
+          bot: user.bot,
+          presence: {
+            status: client.presence?.status || "online",
+            activities: client.presence?.activities?.map((a) => ({
+              name: a.name,
+              type: a.type,
+              state: a.state,
+            })) || [],
+          },
+          inviteLinks: {
+            admin: client.invite.admin(),
+            required: client.invite.required(),
+          },
+          supportServer: client.config.links?.support || null,
+          prefix: client.prefix,
+          owners: client.owners || [],
+          admins: client.admins || [],
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/bot/info: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch bot info."));
+    }
+  });
+
+  /**
+   * GET /api/bot/maintenance
+   * Get maintenance mode status.
+   */
+  app.get("/api/bot/maintenance", auth, (_req, res) => {
+    res.json(
+      successResponse({
+        underMaintenance: client.underMaintenance ?? false,
+      }),
+    );
+  });
+
+  /**
+   * POST /api/bot/maintenance
+   * Toggle maintenance mode.
+   */
+  app.post("/api/bot/maintenance", auth, (req, res) => {
+    const { enabled } = req.body ?? {};
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json(errorResponse("Bad Request", 'Request body must contain a boolean "enabled" field.'));
+    }
+    client.underMaintenance = enabled;
+    res.json(
+      successResponse({
+        underMaintenance: client.underMaintenance,
+        message: enabled ? "Maintenance mode enabled." : "Maintenance mode disabled.",
+      }),
+    );
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // LAVALINK ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/lavalink/nodes
+   * Get status of all Lavalink nodes.
+   */
+  app.get("/api/lavalink/nodes", auth, (_req, res) => {
+    try {
+      const nodes = [];
+      const nodeMap = client.manager?.shoukaku?.nodes ?? new Map();
+
+      for (const [name, node] of nodeMap) {
+        const stateNames = { 0: "CONNECTING", 1: "CONNECTED", 2: "READY", 3: "DISCONNECTING", 4: "DISCONNECTED" };
+        nodes.push({
+          name,
+          state: node.state,
+          stateLabel: stateNames[node.state] || "UNKNOWN",
+          stats: node.stats ? {
+            players: node.stats.players,
+            playingPlayers: node.stats.playingPlayers,
+            uptime: node.stats.uptime,
+            cpu: {
+              cores: node.stats.cpu?.cores,
+              systemLoad: node.stats.cpu?.systemLoad,
+              lavalinkLoad: node.stats.cpu?.lavalinkLoad,
+            },
+            memory: {
+              used: node.stats.memory?.used,
+              free: node.stats.memory?.free,
+              allocated: node.stats.memory?.allocated,
+              reservable: node.stats.memory?.reservable,
+            },
+          } : null,
+        });
+      }
+
+      const readyNodes = nodes.filter((n) => n.state === 2).length;
+
+      res.json(
+        successResponse({
+          totalNodes: nodes.length,
+          readyNodes,
+          disconnectedNodes: nodes.length - readyNodes,
+          nodes,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/lavalink/nodes: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch lavalink nodes."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // USER & GUILD LOOKUP ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/users/:userId
+   * Look up a Discord user by ID.
+   */
+  app.get("/api/users/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const user = await client.users.fetch(userId).catch(() => null);
+      if (!user) {
+        return res.status(404).json(errorResponse("Not Found", `User ${userId} not found.`));
+      }
+
+      // Check user status in various databases
+      // Note: botstaff = premium users, botmods = bot moderators
+      const [isBlacklisted, isNoPrefix, hasPremium, isBotMod] = await Promise.all([
+        safeHas(client.db.blacklist, userId),
+        safeHas(client.db.noPrefix, userId),
+        safeHas(client.db.botstaff, userId),
+        safeHas(client.db.botmods, userId),
+      ]);
+
+      res.json(
+        successResponse({
+          id: user.id,
+          username: user.username,
+          discriminator: user.discriminator,
+          tag: user.tag,
+          avatar: user.displayAvatarURL({ forceStatic: false, size: 512 }),
+          banner: user.bannerURL({ forceStatic: false, size: 512 }),
+          createdAt: user.createdAt,
+          createdTimestamp: user.createdTimestamp,
+          bot: user.bot,
+          system: user.system,
+          status: {
+            isOwner: client.owners?.includes(userId) || false,
+            isAdmin: client.admins?.includes(userId) || false,
+            isBotMod,
+            hasPremium,
+            isNoPrefix,
+            isBlacklisted,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/users/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch user."));
+    }
+  });
+
+  /**
+   * GET /api/guilds/:guildId
+   * Look up a specific guild by ID.
+   */
+  app.get("/api/guilds/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        return res.status(404).json(errorResponse("Not Found", `Guild ${guildId} not found or bot is not a member.`));
+      }
+
+      // Check guild status in various databases
+      const [is247, isIgnored, isPremium, hasCustomPrefix] = await Promise.all([
+        safeHas(client.db.twoFourSeven, guildId),
+        safeHas(client.db.ignore, guildId),
+        safeHas(client.db.serverstaff, guildId),
+        safeGet(client.db.prefix, guildId),
+      ]);
+
+      const player = client.manager?.players?.get(guildId);
+
+      res.json(
+        successResponse({
+          id: guild.id,
+          name: guild.name,
+          description: guild.description,
+          memberCount: guild.memberCount,
+          ownerId: guild.ownerId,
+          icon: guild.iconURL({ forceStatic: false, size: 512 }),
+          banner: guild.bannerURL({ forceStatic: false, size: 512 }),
+          splash: guild.splashURL({ forceStatic: false, size: 512 }),
+          joinedAt: guild.joinedAt,
+          createdAt: guild.createdAt,
+          premiumTier: guild.premiumTier,
+          premiumSubscriptionCount: guild.premiumSubscriptionCount,
+          vanityURLCode: guild.vanityURLCode,
+          verified: guild.verified,
+          partnered: guild.partnered,
+          channels: {
+            total: guild.channels.cache.size,
+            text: guild.channels.cache.filter((c) => c.isTextBased() && !c.isThread()).size,
+            voice: guild.channels.cache.filter((c) => c.isVoiceBased()).size,
+          },
+          roles: guild.roles.cache.size,
+          emojis: guild.emojis.cache.size,
+          status: {
+            isPremium,
+            is247,
+            isIgnored,
+            customPrefix: hasCustomPrefix || null,
+            hasActivePlayer: !!player,
+          },
+          player: player ? {
+            playing: player.playing,
+            paused: player.paused,
+            volume: player.volume,
+            queueSize: player.queue?.size ?? 0,
+            currentTrack: player.queue?.current?.title ?? null,
+          } : null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/guilds/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch guild."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // BLACKLIST MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/blacklist
+   * Get all blacklisted users.
+   */
+  app.get("/api/blacklist", auth, async (_req, res) => {
+    try {
+      const blacklist = await getAllEntries(client.db.blacklist);
+      const entries = await Promise.all(
+        Object.entries(blacklist).map(async ([id, data]) => {
+          const user = await client.users.fetch(id).catch(() => null);
+          return {
+            id,
+            username: user?.username ?? null,
+            tag: user?.tag ?? null,
+            reason: data?.reason ?? "No reason provided",
+            blacklistedAt: data?.at ?? null,
+            blacklistedBy: data?.by ?? null,
+          };
+        }),
+      );
+
+      res.json(
+        successResponse({
+          count: entries.length,
+          entries,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/blacklist: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch blacklist."));
+    }
+  });
+
+  /**
+   * POST /api/blacklist/:userId
+   * Add a user to the blacklist.
+   */
+  app.post("/api/blacklist/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+    const { reason } = req.body ?? {};
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    // Prevent blacklisting owners
+    if (client.owners?.includes(userId)) {
+      return res.status(403).json(errorResponse("Forbidden", "Cannot blacklist bot owners."));
+    }
+
+    try {
+      await client.db.blacklist.set(userId, {
+        reason: reason || "Blacklisted via API",
+        at: Date.now(),
+        by: "API",
+      });
+
+      res.json(
+        successResponse({
+          userId,
+          action: "blacklisted",
+          reason: reason || "Blacklisted via API",
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/blacklist/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to blacklist user."));
+    }
+  });
+
+  /**
+   * DELETE /api/blacklist/:userId
+   * Remove a user from the blacklist.
+   */
+  app.delete("/api/blacklist/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.blacklist, userId);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", `User ${userId} is not blacklisted.`));
+      }
+
+      await client.db.blacklist.delete(userId);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "unblacklisted",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/blacklist/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to unblacklist user."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // IGNORE (CHANNEL/GUILD) MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/ignore
+   * Get all ignored channels/guilds.
+   */
+  app.get("/api/ignore", auth, async (_req, res) => {
+    try {
+      const ignored = await getAllEntries(client.db.ignore);
+      res.json(
+        successResponse({
+          count: Object.keys(ignored).length,
+          entries: ignored,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/ignore: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch ignored list."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // BYPASS MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/bypass
+   * Get all users with bypass permissions.
+   */
+  app.get("/api/bypass", auth, async (_req, res) => {
+    try {
+      const bypassed = await getAllEntries(client.db.bypass);
+      res.json(
+        successResponse({
+          count: Object.keys(bypassed).length,
+          entries: bypassed,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/bypass: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch bypass list."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // PREMIUM MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/premium/users
+   * Get all premium users with details.
+   */
+  app.get("/api/premium/users", auth, async (_req, res) => {
+    try {
+      const premiumUsers = await getAllEntries(client.db.botstaff);
+      const now = Date.now();
+
+      const users = await Promise.all(
+        Object.entries(premiumUsers).map(async ([id, data]) => {
+          const user = await client.users.fetch(id).catch(() => null);
+          const expiresAt = data?.expiresAt || data?.expires;
+          const isExpired = expiresAt ? expiresAt < now : false;
+          const daysLeft = expiresAt ? Math.max(0, Math.floor((expiresAt - now) / 86400000)) : null;
+
+          return {
+            id,
+            username: user?.username ?? null,
+            tag: user?.tag ?? null,
+            avatar: user?.displayAvatarURL({ forceStatic: false, size: 128 }) ?? null,
+            expiresAt,
+            expiresFormatted: expiresAt ? new Date(expiresAt).toISOString() : null,
+            daysLeft,
+            isExpired,
+            isPermanent: data?.permanent || !expiresAt,
+            addedBy: data?.addedBy ?? null,
+            redeemedAt: data?.redeemedAt ?? null,
+          };
+        }),
+      );
+
+      res.json(
+        successResponse({
+          count: users.length,
+          activeCount: users.filter((u) => !u.isExpired).length,
+          expiredCount: users.filter((u) => u.isExpired).length,
+          users,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/premium/users: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch premium users."));
+    }
+  });
+
+  /**
+   * POST /api/premium/users/:userId
+   * Add premium to a user.
+   */
+  app.post("/api/premium/users/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+    const { days, permanent } = req.body ?? {};
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    if (!permanent && (!days || typeof days !== "number" || days < 1 || days > 365)) {
+      return res.status(400).json(errorResponse("Bad Request", "Duration must be between 1 and 365 days, or set permanent: true."));
+    }
+
+    try {
+      const existing = await safeGet(client.db.botstaff, userId);
+      if (existing) {
+        return res.status(409).json(errorResponse("Conflict", "User already has premium."));
+      }
+
+      const data = {
+        redeemedAt: Date.now(),
+        addedBy: "API",
+      };
+
+      if (permanent) {
+        data.permanent = true;
+      } else {
+        data.expiresAt = Date.now() + days * 86400000;
+      }
+
+      await client.db.botstaff.set(userId, data);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "premium_added",
+          days: permanent ? "permanent" : days,
+          expiresAt: data.expiresAt ?? null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/premium/users/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to add premium."));
+    }
+  });
+
+  /**
+   * DELETE /api/premium/users/:userId
+   * Remove premium from a user.
+   */
+  app.delete("/api/premium/users/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.botstaff, userId);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", "User does not have premium."));
+      }
+
+      await client.db.botstaff.delete(userId);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "premium_removed",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/premium/users/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove premium."));
+    }
+  });
+
+  /**
+   * GET /api/premium/guilds
+   * Get all premium guilds with details.
+   */
+  app.get("/api/premium/guilds", auth, async (_req, res) => {
+    try {
+      const premiumGuilds = await getAllEntries(client.db.serverstaff);
+      const now = Date.now();
+
+      const guilds = Object.entries(premiumGuilds).map(([id, data]) => {
+        const guild = client.guilds.cache.get(id);
+        const expiresAt = data?.expiresAt || data?.expires;
+        const isExpired = expiresAt ? expiresAt < now : false;
+        const daysLeft = expiresAt ? Math.max(0, Math.floor((expiresAt - now) / 86400000)) : null;
+
+        return {
+          id,
+          name: guild?.name ?? null,
+          memberCount: guild?.memberCount ?? null,
+          icon: guild?.iconURL({ forceStatic: false, size: 128 }) ?? null,
+          inBot: !!guild,
+          expiresAt,
+          expiresFormatted: expiresAt ? new Date(expiresAt).toISOString() : null,
+          daysLeft,
+          isExpired,
+          isPermanent: data?.permanent || !expiresAt,
+          addedBy: data?.addedBy ?? null,
+        };
+      });
+
+      res.json(
+        successResponse({
+          count: guilds.length,
+          activeCount: guilds.filter((g) => !g.isExpired).length,
+          expiredCount: guilds.filter((g) => g.isExpired).length,
+          guilds,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/premium/guilds: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch premium guilds."));
+    }
+  });
+
+  /**
+   * POST /api/premium/guilds/:guildId
+   * Add premium to a guild.
+   */
+  app.post("/api/premium/guilds/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const { days, permanent } = req.body ?? {};
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    if (!permanent && (!days || typeof days !== "number" || days < 1 || days > 365)) {
+      return res.status(400).json(errorResponse("Bad Request", "Duration must be between 1 and 365 days, or set permanent: true."));
+    }
+
+    try {
+      const existing = await safeGet(client.db.serverstaff, guildId);
+      if (existing) {
+        return res.status(409).json(errorResponse("Conflict", "Guild already has premium."));
+      }
+
+      const data = {
+        redeemedAt: Date.now(),
+        addedBy: "API",
+      };
+
+      if (permanent) {
+        data.permanent = true;
+      } else {
+        data.expiresAt = Date.now() + days * 86400000;
+      }
+
+      await client.db.serverstaff.set(guildId, data);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "premium_added",
+          days: permanent ? "permanent" : days,
+          expiresAt: data.expiresAt ?? null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/premium/guilds/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to add guild premium."));
+    }
+  });
+
+  /**
+   * DELETE /api/premium/guilds/:guildId
+   * Remove premium from a guild.
+   */
+  app.delete("/api/premium/guilds/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.serverstaff, guildId);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", "Guild does not have premium."));
+      }
+
+      await client.db.serverstaff.delete(guildId);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "premium_removed",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/premium/guilds/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove guild premium."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // NO-PREFIX MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/noprefix
+   * Get all users with no-prefix privilege.
+   */
+  app.get("/api/noprefix", auth, async (_req, res) => {
+    try {
+      const noPrefixUsers = await getAllEntries(client.db.noPrefix);
+
+      const users = await Promise.all(
+        Object.entries(noPrefixUsers).map(async ([id, data]) => {
+          const user = await client.users.fetch(id).catch(() => null);
+          const now = Date.now();
+          const expiresAt = typeof data === "object" ? (data?.expiresAt || data?.expires) : null;
+          const isExpired = expiresAt ? expiresAt < now : false;
+          const isPermanent = data === true || data?.permanent || !expiresAt;
+
+          return {
+            id,
+            username: user?.username ?? null,
+            tag: user?.tag ?? null,
+            isPermanent,
+            expiresAt,
+            isExpired,
+          };
+        }),
+      );
+
+      res.json(
+        successResponse({
+          count: users.length,
+          users,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/noprefix: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch no-prefix users."));
+    }
+  });
+
+  /**
+   * POST /api/noprefix/:userId
+   * Add no-prefix privilege to a user.
+   */
+  app.post("/api/noprefix/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+    const { days, permanent } = req.body ?? {};
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const existing = await safeHas(client.db.noPrefix, userId);
+      if (existing) {
+        return res.status(409).json(errorResponse("Conflict", "User already has no-prefix."));
+      }
+
+      let data;
+      if (permanent || !days) {
+        data = { permanent: true, addedBy: "API", addedAt: Date.now() };
+      } else {
+        data = { expiresAt: Date.now() + days * 86400000, addedBy: "API", addedAt: Date.now() };
+      }
+
+      await client.db.noPrefix.set(userId, data);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "noprefix_added",
+          permanent: !!permanent || !days,
+          expiresAt: data.expiresAt ?? null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/noprefix/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to add no-prefix."));
+    }
+  });
+
+  /**
+   * DELETE /api/noprefix/:userId
+   * Remove no-prefix privilege from a user.
+   */
+  app.delete("/api/noprefix/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.noPrefix, userId);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", "User does not have no-prefix."));
+      }
+
+      await client.db.noPrefix.delete(userId);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "noprefix_removed",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/noprefix/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove no-prefix."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // REDEEM CODE MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/redeem
+   * Get all redeem codes.
+   */
+  app.get("/api/redeem", auth, async (_req, res) => {
+    try {
+      const codes = await getAllEntries(client.db.redeemCode);
+
+      const formatted = Object.entries(codes).map(([code, data]) => ({
+        code,
+        type: data?.type ?? "unknown",
+        duration: data?.duration ?? null,
+        expiresAt: data?.expiresAt ?? null,
+        expiresFormatted: data?.expiresAt ? new Date(data.expiresAt).toISOString() : null,
+        redeemed: data?.redeemed ?? false,
+        redeemedBy: data?.redeemedBy ?? null,
+        redeemedAt: data?.redeemedAt ?? null,
+        generatedBy: data?.generatedBy ?? null,
+        generatedAt: data?.generatedAt ?? null,
+      }));
+
+      res.json(
+        successResponse({
+          count: formatted.length,
+          unusedCount: formatted.filter((c) => !c.redeemed).length,
+          usedCount: formatted.filter((c) => c.redeemed).length,
+          codes: formatted,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/redeem: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch redeem codes."));
+    }
+  });
+
+  /**
+   * POST /api/redeem
+   * Generate a new redeem code.
+   */
+  app.post("/api/redeem", auth, async (req, res) => {
+    const { type, days } = req.body ?? {};
+
+    if (!["user", "guild"].includes(type)) {
+      return res.status(400).json(errorResponse("Bad Request", "Type must be 'user' or 'guild'."));
+    }
+
+    if (!days || typeof days !== "number" || days < 1 || days > 365) {
+      return res.status(400).json(errorResponse("Bad Request", "Duration must be between 1 and 365 days."));
+    }
+
+    try {
+      const crypto = await import("crypto");
+      const code = crypto.randomBytes(5).toString("hex").toUpperCase();
+      const expiresAt = Date.now() + days * 24 * 60 * 60 * 1000;
+
+      await client.db.redeemCode.set(code, {
+        type,
+        duration: days,
+        expiresAt,
+        redeemed: false,
+        generatedAt: Date.now(),
+        generatedBy: "API",
+      });
+
+      res.json(
+        successResponse({
+          code,
+          type,
+          duration: days,
+          expiresAt,
+          expiresFormatted: new Date(expiresAt).toISOString(),
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/redeem: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to generate redeem code."));
+    }
+  });
+
+  /**
+   * DELETE /api/redeem/:code
+   * Delete a redeem code.
+   */
+  app.delete("/api/redeem/:code", auth, async (req, res) => {
+    const { code } = req.params;
+
+    try {
+      const exists = await safeHas(client.db.redeemCode, code);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", "Redeem code not found."));
+      }
+
+      await client.db.redeemCode.delete(code);
+
+      res.json(
+        successResponse({
+          code,
+          action: "deleted",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/redeem/${code}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to delete redeem code."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 24/7 PLAYERS MANAGEMENT ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/247
+   * Get all guilds with 24/7 players enabled.
+   */
+  app.get("/api/247", auth, async (_req, res) => {
+    try {
+      const twoFourSeven = await getAllEntries(client.db.twoFourSeven);
+
+      const guilds = Object.entries(twoFourSeven).map(([guildId, data]) => {
+        const guild = client.guilds.cache.get(guildId);
+        const voiceChannel = data?.voiceId ? client.channels.cache.get(data.voiceId) : null;
+        const textChannel = data?.textId ? client.channels.cache.get(data.textId) : null;
+        const player = client.manager?.players?.get(guildId);
+
+        return {
+          guildId,
+          guildName: guild?.name ?? null,
+          memberCount: guild?.memberCount ?? null,
+          inBot: !!guild,
+          voiceChannel: {
+            id: data?.voiceId ?? null,
+            name: voiceChannel?.name ?? null,
+          },
+          textChannel: {
+            id: data?.textId ?? null,
+            name: textChannel?.name ?? null,
+          },
+          hasActivePlayer: !!player,
+          playerStatus: player ? {
+            playing: player.playing,
+            paused: player.paused,
+            queueSize: player.queue?.size ?? 0,
+          } : null,
+        };
+      });
+
+      res.json(
+        successResponse({
+          count: guilds.length,
+          activeCount: guilds.filter((g) => g.hasActivePlayer).length,
+          guilds,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/247: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch 24/7 players."));
+    }
+  });
+
+  /**
+   * DELETE /api/247/:guildId
+   * Remove 24/7 from a guild.
+   */
+  app.delete("/api/247/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.twoFourSeven, guildId);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", "Guild does not have 24/7 enabled."));
+      }
+
+      await client.db.twoFourSeven.delete(guildId);
+
+      // Also destroy the player if exists
+      const player = client.manager?.players?.get(guildId);
+      if (player) {
+        await player.destroy();
+      }
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "247_removed",
+          playerDestroyed: !!player,
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/247/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove 24/7."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // AFK USERS ENDPOINT
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/afk
+   * Get all AFK users.
+   */
+  app.get("/api/afk", auth, async (_req, res) => {
+    try {
+      const afkUsers = await getAllEntries(client.db.afk);
+
+      const users = await Promise.all(
+        Object.entries(afkUsers).map(async ([id, data]) => {
+          const user = await client.users.fetch(id).catch(() => null);
+          return {
+            id,
+            username: user?.username ?? null,
+            tag: user?.tag ?? null,
+            reason: data?.reason ?? "No reason",
+            since: data?.since ?? data?.timestamp ?? null,
+            sinceFormatted: data?.since ? new Date(data.since).toISOString() : null,
+          };
+        }),
+      );
+
+      res.json(
+        successResponse({
+          count: users.length,
+          users,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/afk: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch AFK users."));
+    }
+  });
+
+  /**
+   * DELETE /api/afk/:userId
+   * Remove AFK status from a user.
+   */
+  app.delete("/api/afk/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!/^\d{17,19}$/.test(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const exists = await safeHas(client.db.afk, userId);
+      if (!exists) {
+        return res.status(404).json(errorResponse("Not Found", "User is not AFK."));
+      }
+
+      await client.db.afk.delete(userId);
+
+      res.json(
+        successResponse({
+          userId,
+          action: "afk_removed",
+        }),
+      );
+    } catch (err) {
+      log(`API error on DELETE /api/afk/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to remove AFK status."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // PLAYER CONTROL ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * POST /api/players/:guildId/pause
+   * Pause the player in a guild.
+   */
+  app.post("/api/players/:guildId/pause", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      if (player.paused) {
+        return res.status(400).json(errorResponse("Bad Request", "Player is already paused."));
+      }
+
+      player.pause(true);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "paused",
+          currentTrack: player.queue?.current?.title ?? null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/pause: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to pause player."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/resume
+   * Resume the player in a guild.
+   */
+  app.post("/api/players/:guildId/resume", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      if (!player.paused) {
+        return res.status(400).json(errorResponse("Bad Request", "Player is not paused."));
+      }
+
+      player.pause(false);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "resumed",
+          currentTrack: player.queue?.current?.title ?? null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/resume: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to resume player."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/skip
+   * Skip the current track in a guild.
+   */
+  app.post("/api/players/:guildId/skip", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const skippedTrack = player.queue?.current?.title ?? null;
+      player.skip();
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "skipped",
+          skippedTrack,
+          nextTrack: player.queue?.current?.title ?? null,
+          queueSize: player.queue?.size ?? 0,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/skip: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to skip track."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/stop
+   * Stop and destroy the player in a guild.
+   */
+  app.post("/api/players/:guildId/stop", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      await player.destroy();
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "stopped",
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/stop: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to stop player."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/volume
+   * Set volume for the player in a guild.
+   */
+  app.post("/api/players/:guildId/volume", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const { volume } = req.body ?? {};
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    if (typeof volume !== "number" || volume < 0 || volume > 200) {
+      return res.status(400).json(errorResponse("Bad Request", "Volume must be a number between 0 and 200."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const previousVolume = player.volume;
+      player.setVolume(volume);
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "volume_set",
+          previousVolume,
+          newVolume: volume,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/volume: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to set volume."));
+    }
+  });
+
+  /**
+   * GET /api/players/:guildId
+   * Get detailed player information for a guild.
+   */
+  app.get("/api/players/:guildId", auth, (req, res) => {
+    const { guildId } = req.params;
+
+    if (!/^\d{17,19}$/.test(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const guild = client.guilds.cache.get(guildId);
+      const current = player.queue?.current;
+
+      res.json(
+        successResponse({
+          guildId,
+          guildName: guild?.name ?? null,
+          state: {
+            playing: player.playing,
+            paused: player.paused,
+            volume: player.volume,
+            loop: player.loop,
+            positionMs: player.position,
+            positionFormatted: client.formatDuration(player.position),
+            is247: player.data?.get("247") ?? false,
+            autoplay: player.data?.get("autoplayStatus") ?? false,
+          },
+          currentTrack: current ? {
+            title: current.title,
+            author: current.author,
+            uri: current.uri,
+            durationMs: current.length,
+            durationFormatted: client.formatDuration(current.length),
+            thumbnail: current.thumbnail ?? null,
+            isStream: current.isStream,
+            sourceName: current.sourceName ?? null,
+            requester: {
+              id: current.requester?.id ?? null,
+              username: current.requester?.username ?? null,
+            },
+          } : null,
+          queue: {
+            size: player.queue?.size ?? 0,
+            totalDurationMs: player.queue?.reduce((sum, t) => sum + (t.length || 0), 0) ?? 0,
+            tracks: (player.queue?.slice(0, 10) ?? []).map((t) => ({
+              title: t.title,
+              author: t.author,
+              durationMs: t.length,
+            })),
+          },
+          voiceChannel: {
+            id: player.voiceId,
+            name: client.channels.cache.get(player.voiceId)?.name ?? null,
+          },
+          textChannel: {
+            id: player.textId,
+            name: client.channels.cache.get(player.textId)?.name ?? null,
+          },
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/players/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch player info."));
     }
   });
 
