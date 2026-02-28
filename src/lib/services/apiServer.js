@@ -106,7 +106,7 @@ const apiCache = new APICache();
 
 // Cleanup cache periodically
 const cacheCleanupInterval = setInterval(() => apiCache.cleanup(), CACHE_TTL_MS);
-cacheCleanupInterval.unref?.();
+cacheCleanupInterval.unref();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AUDIT LOGGING SYSTEM
@@ -286,7 +286,7 @@ function deepClone(obj) {
     try {
       return globalThis.structuredClone(obj);
     } catch {
-      // Fallback to JSON clone for non-structured-cloneable values
+      // Expected for values unsupported by structuredClone (e.g., functions)
     }
   }
   return JSON.parse(JSON.stringify(obj));
@@ -513,7 +513,7 @@ function advancedRateLimiter(endpointLimits = new Map()) {
       }
     }
   }, RATE_LIMIT_CLEANUP_BUFFER_MS);
-  rateLimitCleanupInterval.unref?.();
+  rateLimitCleanupInterval.unref();
 
   return (req, res, next) => {
     const ip = req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress;
@@ -731,6 +731,8 @@ function errorResponse(error, message) {
  * Health & Info:
  *   GET /api                           → API info and available endpoints
  *   GET /api/health                    → Health check
+ *   GET /api/health/live               → Liveness probe
+ *   GET /api/health/ready              → Readiness probe
  *
  * Database:
  *   GET /api/db                        → List available collections
@@ -884,6 +886,8 @@ export function startApiServer(client) {
           info: {
             root: "GET /api",
             health: "GET /api/health",
+            healthLive: "GET /api/health/live",
+            healthReady: "GET /api/health/ready",
             metrics: "GET /api/metrics",
             cache: "GET /api/cache",
             audit: "GET /api/audit",
@@ -1074,6 +1078,35 @@ export function startApiServer(client) {
           version: API_VERSION,
           build: API_BUILD,
         },
+      }),
+    );
+  });
+
+  /**
+   * GET /api/health/live
+   * Lightweight liveness probe endpoint.
+   */
+  app.get("/api/health/live", (_req, res) => {
+    res.json(
+      successResponse({
+        status: "alive",
+        service: "nerox-api",
+        version: API_VERSION,
+      }),
+    );
+  });
+
+  /**
+   * GET /api/health/ready
+   * Readiness probe endpoint.
+   */
+  app.get("/api/health/ready", (_req, res) => {
+    const isReady = client.isReady() && !!client.db;
+    res.status(isReady ? 200 : 503).json(
+      successResponse({
+        status: isReady ? "ready" : "not_ready",
+        botReady: client.isReady(),
+        databaseConnected: !!client.db,
       }),
     );
   });
@@ -5422,7 +5455,7 @@ export function startApiServer(client) {
     });
 
     for (const wsClient of wsClients) {
-      if (wsClient.readyState === WebSocket.OPEN) {
+      if (wsClient && wsClient.readyState === WebSocket.OPEN) {
         wsClient.send(message);
       }
     }
@@ -5455,9 +5488,9 @@ export function startApiServer(client) {
     // Authenticate WebSocket connection
     let url;
     try {
-      url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      url = new URL(req.url, "http://localhost");
     } catch {
-      ws.close(1008, "Unauthorized: Invalid request URL");
+      ws.close(1002, "Invalid request URL");
       return;
     }
     const providedKey = url.searchParams.get("apiKey") || req.headers["x-api-key"];
