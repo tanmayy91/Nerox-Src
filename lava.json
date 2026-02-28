@@ -2,17 +2,17 @@
   "nodes": [
     {
       "name": "primary-node",
-      "host": "",
-      "port": 6969,
-      "password": "",
-      "secure": false,
+      "host": "lava-v3.ajieblogs.eu.org",
+      "port": 443,
+      "password": "https://dsc.gg/ajidevserver",
+      "secure": true,
       "priority": 1
     },
     {
       "name": "backup-node",
-      "host": "",
-      "port": 6969,
-      "password": "kaalahoon",
+      "host": "lavalink.jirayu.net",
+      "port": 13592,
+      "password": "youshallnotpass",
       "secure": false,
       "priority": 2
     }
