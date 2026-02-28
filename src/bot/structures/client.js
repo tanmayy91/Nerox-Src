@@ -57,6 +57,7 @@ export class ExtendedClient extends Client {
     this.emoji = emoji;
     this.config = config;
     this.webhooks = {}; // Will be initialized in ready event
+    this.log = (message, type) => void log(message, type);
     this.manager = Manager.init(this);
     this.underMaintenance = false;
     this.prefix = config.prefix || "&";
@@ -122,7 +123,6 @@ export class ExtendedClient extends Client {
 
     this.connectToGateway = () => (this.login(config.token), this);
 
-    this.log = (message, type) => void log(message, type);
     this.sleep = async (s) =>
       void (await new Promise((resolve) => setTimeout(resolve, s * 1000)));
 
