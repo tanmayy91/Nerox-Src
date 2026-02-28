@@ -17,8 +17,7 @@ import {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const API_VERSION = "5.0.0";
-// API_PREFIX reserved for future versioned endpoints
-const _API_PREFIX = "/api/v1";
+const RATE_LIMIT_CLEANUP_BUFFER_MS = 60000;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CONFIGURATION
@@ -177,45 +176,6 @@ function authenticate(apiKey) {
 }
 
 /**
- * Simple in-memory rate limiter (legacy, use advancedRateLimiter instead).
- * @param {number} windowMs - Time window in milliseconds.
- * @param {number} maxRequests - Maximum requests per window.
- * @returns {Function} Express middleware function.
- */
-function _rateLimiter(windowMs = 60000, maxRequests = 100) {
-  const requests = new Map();
-
-  return (req, res, next) => {
-    const ip = req.ip || req.connection.remoteAddress;
-    const now = Date.now();
-
-    if (!requests.has(ip)) {
-      requests.set(ip, { count: 1, resetAt: now + windowMs });
-      return next();
-    }
-
-    const record = requests.get(ip);
-    if (now > record.resetAt) {
-      record.count = 1;
-      record.resetAt = now + windowMs;
-      return next();
-    }
-
-    if (record.count >= maxRequests) {
-      return res.status(429).json({
-        success: false,
-        error: "Too Many Requests",
-        message: `Rate limit exceeded. Try again in ${Math.ceil((record.resetAt - now) / 1000)}s.`,
-        retryAfter: Math.ceil((record.resetAt - now) / 1000),
-      });
-    }
-
-    record.count++;
-    next();
-  };
-}
-
-/**
  * Error handling middleware.
  */
 function errorHandler(err, req, res, _next) {
@@ -263,11 +223,11 @@ function advancedRateLimiter(endpointLimits = new Map()) {
   setInterval(() => {
     const now = Date.now();
     for (const [key, record] of requests) {
-      if (now > record.resetAt + 60000) {
+      if (now > record.resetAt + RATE_LIMIT_CLEANUP_BUFFER_MS) {
         requests.delete(key);
       }
     }
-  }, 60000);
+  }, RATE_LIMIT_CLEANUP_BUFFER_MS);
 
   return (req, res, next) => {
     const ip = req.ip || req.connection.remoteAddress;
@@ -318,79 +278,6 @@ function advancedRateLimiter(endpointLimits = new Map()) {
     }
 
     record.count++;
-    next();
-  };
-}
-
-/**
- * Request body validation middleware (available for future use).
- * @param {object} schema - Validation schema { field: { type, required, min, max, enum } }
- * @returns {Function} Express middleware function.
- */
-function _validateBody(schema) {
-  return (req, res, next) => {
-    const body = req.body ?? {};
-    const errors = [];
-
-    for (const [field, rules] of Object.entries(schema)) {
-      const value = body[field];
-
-      // Check required
-      if (rules.required && (value === undefined || value === null)) {
-        errors.push(`Field "${field}" is required.`);
-        continue;
-      }
-
-      // Skip validation if not present and not required
-      if (value === undefined || value === null) continue;
-
-      // Type check
-      if (rules.type && typeof value !== rules.type) {
-        errors.push(`Field "${field}" must be of type ${rules.type}.`);
-        continue;
-      }
-
-      // Min/Max for numbers
-      if (rules.type === "number") {
-        if (rules.min !== undefined && value < rules.min) {
-          errors.push(`Field "${field}" must be at least ${rules.min}.`);
-        }
-        if (rules.max !== undefined && value > rules.max) {
-          errors.push(`Field "${field}" must be at most ${rules.max}.`);
-        }
-      }
-
-      // Min/Max length for strings
-      if (rules.type === "string") {
-        if (rules.minLength !== undefined && value.length < rules.minLength) {
-          errors.push(`Field "${field}" must be at least ${rules.minLength} characters.`);
-        }
-        if (rules.maxLength !== undefined && value.length > rules.maxLength) {
-          errors.push(`Field "${field}" must be at most ${rules.maxLength} characters.`);
-        }
-      }
-
-      // Enum validation
-      if (rules.enum && !rules.enum.includes(value)) {
-        errors.push(`Field "${field}" must be one of: ${rules.enum.join(", ")}.`);
-      }
-
-      // Pattern validation
-      if (rules.pattern && !rules.pattern.test(value)) {
-        errors.push(`Field "${field}" does not match required pattern.`);
-      }
-    }
-
-    if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Validation Error",
-        message: errors.join(" "),
-        errors,
-        requestId: req.requestId,
-      });
-    }
-
     next();
   };
 }
@@ -487,8 +374,14 @@ async function sendWebhookNotification(event, data) {
         data,
       };
 
+      // Skip if no secret is configured (required for security)
+      if (!sub.secret) {
+        log(`Webhook ${sub.url} skipped: missing secret`, "warn");
+        continue;
+      }
+
       const signature = crypto
-        .createHmac("sha256", sub.secret || "default-secret")
+        .createHmac("sha256", sub.secret)
         .update(JSON.stringify(payload))
         .digest("hex");
 
@@ -3373,9 +3266,9 @@ export function startApiServer(client) {
       data,
     });
 
-    for (const client of wsClients) {
-      if (client.readyState === 1) { // WebSocket.OPEN
-        client.send(message);
+    for (const wsClient of wsClients) {
+      if (wsClient.readyState === WebSocketServer.OPEN || wsClient.readyState === 1) {
+        wsClient.send(message);
       }
     }
 
