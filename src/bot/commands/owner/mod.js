@@ -113,7 +113,10 @@ export default class ModManage extends Command {
             });
             return;
           }
-          await ctx.client.db.botmods.set(target.id, true);
+          await ctx.client.db.botmods.set(target.id, {
+            addedAt: Date.now(),
+            addedBy: ctx.author.id,
+          });
           await ctx.reply({
             embeds: [
               client

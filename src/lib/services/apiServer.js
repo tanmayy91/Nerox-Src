@@ -30,6 +30,7 @@ const API_BUILD = "2024.12.ULTRA";
 const RATE_LIMIT_CLEANUP_BUFFER_MS = 60000;
 const CACHE_TTL_MS = 30000; // 30 seconds cache
 const MAX_AUDIT_LOG_SIZE = 500;
+const ACTIVITY_PER_LEVEL = 50; // Activity points needed per level
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ADVANCED CACHING SYSTEM
@@ -967,7 +968,9 @@ export function startApiServer(client) {
             remove: "DELETE /api/afk/:userId",
           },
           players: {
+            list: "GET /api/players",
             get: "GET /api/players/:guildId",
+            nowplaying: "GET /api/players/:guildId/nowplaying",
             pause: "POST /api/players/:guildId/pause",
             resume: "POST /api/players/:guildId/resume",
             skip: "POST /api/players/:guildId/skip",
@@ -976,6 +979,7 @@ export function startApiServer(client) {
             seek: "POST /api/players/:guildId/seek",
             shuffle: "POST /api/players/:guildId/shuffle",
             loop: "POST /api/players/:guildId/loop",
+            autoplay: "POST /api/players/:guildId/autoplay",
             previous: "POST /api/players/:guildId/previous",
             play: "POST /api/players/:guildId/play",
             filters: {
@@ -1005,6 +1009,10 @@ export function startApiServer(client) {
             list: "GET /api/friends/:userId",
             add: "POST /api/friends/:userId/:friendId",
             remove: "DELETE /api/friends/:userId/:friendId",
+          },
+          stats: {
+            user: "GET /api/stats/user/:userId",
+            guild: "GET /api/stats/guild/:guildId",
           },
           botmods: {
             list: "GET /api/botmods",
@@ -2216,7 +2224,6 @@ export function startApiServer(client) {
    */
   app.post("/api/blacklist/:userId", auth, async (req, res) => {
     const { userId } = req.params;
-    const { reason } = req.body ?? {};
 
     if (!/^\d{17,19}$/.test(userId)) {
       return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
@@ -2228,17 +2235,13 @@ export function startApiServer(client) {
     }
 
     try {
-      await client.db.blacklist.set(userId, {
-        reason: reason || "Blacklisted via API",
-        at: Date.now(),
-        by: "API",
-      });
+      // Store as true to match bot command format
+      await client.db.blacklist.set(userId, true);
 
       res.json(
         successResponse({
           userId,
           action: "blacklisted",
-          reason: reason || "Blacklisted via API",
         }),
       );
     } catch (err) {
@@ -2591,20 +2594,12 @@ export function startApiServer(client) {
       const noPrefixUsers = await getAllEntries(client.db.noPrefix);
 
       const users = await Promise.all(
-        Object.entries(noPrefixUsers).map(async ([id, data]) => {
+        Object.entries(noPrefixUsers).map(async ([id, _data]) => {
           const user = await client.users.fetch(id).catch(() => null);
-          const now = Date.now();
-          const expiresAt = typeof data === "object" ? (data?.expiresAt || data?.expires) : null;
-          const isExpired = expiresAt ? expiresAt < now : false;
-          const isPermanent = data === true || data?.permanent || !expiresAt;
-
           return {
             id,
             username: user?.username ?? null,
             tag: user?.tag ?? null,
-            isPermanent,
-            expiresAt,
-            isExpired,
           };
         }),
       );
@@ -2627,7 +2622,6 @@ export function startApiServer(client) {
    */
   app.post("/api/noprefix/:userId", auth, async (req, res) => {
     const { userId } = req.params;
-    const { days, permanent } = req.body ?? {};
 
     if (!/^\d{17,19}$/.test(userId)) {
       return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
@@ -2639,21 +2633,13 @@ export function startApiServer(client) {
         return res.status(409).json(errorResponse("Conflict", "User already has no-prefix."));
       }
 
-      let data;
-      if (permanent || !days) {
-        data = { permanent: true, addedBy: "API", addedAt: Date.now() };
-      } else {
-        data = { expiresAt: Date.now() + days * 86400000, addedBy: "API", addedAt: Date.now() };
-      }
-
-      await client.db.noPrefix.set(userId, data);
+      // Store as true to match bot command format
+      await client.db.noPrefix.set(userId, true);
 
       res.json(
         successResponse({
           userId,
           action: "noprefix_added",
-          permanent: !!permanent || !days,
-          expiresAt: data.expiresAt ?? null,
         }),
       );
     } catch (err) {
@@ -2888,12 +2874,10 @@ export function startApiServer(client) {
         return res.status(409).json(errorResponse("Conflict", "24/7 is already enabled for this guild."));
       }
 
+      // Store data in same format as bot command: { textId, voiceId }
       const data = {
-        guildId,
-        voiceId: voiceChannelId,
         textId: textChannelId || null,
-        enabledAt: Date.now(),
-        enabledBy: "API",
+        voiceId: voiceChannelId || null,
       };
 
       await client.db.twoFourSeven.set(guildId, data);
@@ -2968,13 +2952,14 @@ export function startApiServer(client) {
       const users = await Promise.all(
         Object.entries(afkUsers).map(async ([id, data]) => {
           const user = await client.users.fetch(id).catch(() => null);
+          const ts = data?.timestamp ?? data?.since ?? null;
           return {
             id,
             username: user?.username ?? null,
             tag: user?.tag ?? null,
             reason: data?.reason ?? "No reason",
-            since: data?.since ?? data?.timestamp ?? null,
-            sinceFormatted: data?.since ? new Date(data.since).toISOString() : null,
+            timestamp: ts,
+            timestampFormatted: ts ? new Date(ts).toISOString() : null,
           };
         }),
       );
@@ -3040,7 +3025,8 @@ export function startApiServer(client) {
       }
 
       const user = await client.users.fetch(userId).catch(() => null);
-      const duration = afkData.since ? Date.now() - afkData.since : null;
+      const ts = afkData.timestamp ?? afkData.since ?? null;
+      const duration = ts ? Date.now() - ts : null;
 
       res.json(
         successResponse({
@@ -3049,8 +3035,8 @@ export function startApiServer(client) {
           tag: user?.tag ?? null,
           avatar: user?.displayAvatarURL({ forceStatic: false, size: 256 }) ?? null,
           reason: afkData.reason ?? "No reason provided",
-          since: afkData.since ?? afkData.timestamp ?? null,
-          sinceFormatted: afkData.since ? new Date(afkData.since).toISOString() : null,
+          timestamp: ts,
+          timestampFormatted: ts ? new Date(ts).toISOString() : null,
           durationMs: duration,
           durationFormatted: duration ? formatUptime(duration) : null,
         }),
@@ -3079,8 +3065,7 @@ export function startApiServer(client) {
 
       const afkData = {
         reason: sanitizedReason,
-        since: Date.now(),
-        setBy: "API",
+        timestamp: Date.now(),
       };
 
       await client.db.afk.set(userId, afkData);
@@ -3093,8 +3078,8 @@ export function startApiServer(client) {
           username: user?.username ?? null,
           action: existing ? "afk_updated" : "afk_set",
           reason: sanitizedReason,
-          since: afkData.since,
-          sinceFormatted: new Date(afkData.since).toISOString(),
+          timestamp: afkData.timestamp,
+          timestampFormatted: new Date(afkData.timestamp).toISOString(),
         }),
       );
     } catch (err) {
@@ -3106,6 +3091,114 @@ export function startApiServer(client) {
   // ══════════════════════════════════════════════════════════════════════════════
   // PLAYER CONTROL ENDPOINTS
   // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/players
+   * Get all active players across all guilds.
+   */
+  app.get("/api/players", auth, (_req, res) => {
+    try {
+      const players = client.manager?.players;
+      if (!players || players.size === 0) {
+        return res.json(
+          successResponse({
+            count: 0,
+            players: [],
+          }),
+        );
+      }
+
+      const playersList = [];
+      for (const [guildId, player] of players) {
+        const guild = client.guilds.cache.get(guildId);
+        const current = player.queue?.current;
+        playersList.push({
+          guildId,
+          guildName: guild?.name ?? null,
+          playing: player.playing,
+          paused: player.paused,
+          volume: player.volume,
+          queueSize: player.queue?.size ?? 0,
+          currentTrack: current ? {
+            title: current.title,
+            author: current.author,
+            durationMs: current.length,
+          } : null,
+          voiceChannelId: player.voiceId,
+          textChannelId: player.textId,
+        });
+      }
+
+      res.json(
+        successResponse({
+          count: playersList.length,
+          players: playersList,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/players: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch players."));
+    }
+  });
+
+  /**
+   * GET /api/players/:guildId/nowplaying
+   * Get the currently playing track in a guild.
+   */
+  app.get("/api/players/:guildId/nowplaying", auth, (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const current = player.queue?.current;
+      if (!current) {
+        return res.status(404).json(errorResponse("Not Found", "No track is currently playing."));
+      }
+
+      const guild = client.guilds.cache.get(guildId);
+
+      res.json(
+        successResponse({
+          guildId,
+          guildName: guild?.name ?? null,
+          playing: player.playing,
+          paused: player.paused,
+          track: {
+            title: current.title,
+            author: current.author,
+            uri: current.uri,
+            durationMs: current.length,
+            durationFormatted: client.formatDuration(current.length),
+            positionMs: player.position,
+            positionFormatted: client.formatDuration(player.position),
+            progressPercent: current.length > 0 ? Math.round((player.position / current.length) * 100) : 0,
+            thumbnail: current.thumbnail ?? null,
+            isStream: current.isStream,
+            sourceName: current.sourceName ?? null,
+            requester: {
+              id: current.requester?.id ?? null,
+              username: current.requester?.username ?? null,
+            },
+          },
+          volume: player.volume,
+          loop: player.loop,
+          autoplay: player.data?.get("autoplayStatus") ?? false,
+          queueSize: player.queue?.size ?? 0,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/players/${guildId}/nowplaying: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch now playing."));
+    }
+  });
 
   /**
    * POST /api/players/:guildId/pause
@@ -3487,6 +3580,49 @@ export function startApiServer(client) {
     } catch (err) {
       log(`API error on POST /api/players/${guildId}/loop: ${err.message}`, "error");
       res.status(500).json(errorResponse("Server Error", "Failed to set loop mode."));
+    }
+  });
+
+  /**
+   * POST /api/players/:guildId/autoplay
+   * Toggle autoplay mode for the player.
+   */
+  app.post("/api/players/:guildId/autoplay", auth, async (req, res) => {
+    const { guildId } = req.params;
+    const { enabled } = req.body ?? {};
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const player = client.manager?.players?.get(guildId);
+      if (!player) {
+        return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
+      }
+
+      const currentStatus = player.data?.get("autoplayStatus") ?? false;
+      
+      // If enabled is provided, use it; otherwise toggle
+      const newStatus = typeof enabled === "boolean" ? enabled : !currentStatus;
+      
+      if (newStatus) {
+        player.data.set("autoplayStatus", true);
+      } else {
+        player.data.delete("autoplayStatus");
+      }
+
+      res.json(
+        successResponse({
+          guildId,
+          action: "autoplay_toggled",
+          previousStatus: currentStatus,
+          newStatus,
+        }),
+      );
+    } catch (err) {
+      log(`API error on POST /api/players/${guildId}/autoplay: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to toggle autoplay."));
     }
   });
 
@@ -4353,6 +4489,111 @@ export function startApiServer(client) {
   });
 
   // ══════════════════════════════════════════════════════════════════════════════
+  // USER STATS ENDPOINTS
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/stats/user/:userId
+   * Get user statistics (commands used, songs played, etc.)
+   */
+  app.get("/api/stats/user/:userId", auth, async (req, res) => {
+    const { userId } = req.params;
+
+    if (!isValidDiscordId(userId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid user ID format."));
+    }
+
+    try {
+      const [commandsUsed, songsPlayed, likedSongs, friends, premiumData] = await Promise.all([
+        safeGet(client.db.stats.commandsUsed, userId),
+        safeGet(client.db.stats.songsPlayed, userId),
+        safeGet(client.db.likedSongs, userId),
+        safeGet(client.db.stats.friends, userId),
+        safeGet(client.db.botstaff, userId),
+      ]);
+
+      const user = await client.users.fetch(userId).catch(() => null);
+
+      // Calculate level based on activity
+      const totalActivity = (commandsUsed ?? 0) + (songsPlayed ?? 0);
+      const level = Math.floor(totalActivity / ACTIVITY_PER_LEVEL) + 1;
+
+      res.json(
+        successResponse({
+          userId,
+          username: user?.username ?? null,
+          avatar: user?.displayAvatarURL({ forceStatic: false, size: 256 }) ?? null,
+          stats: {
+            commandsUsed: commandsUsed ?? 0,
+            songsPlayed: songsPlayed ?? 0,
+            likedSongsCount: Array.isArray(likedSongs) ? likedSongs.length : 0,
+            friendsCount: Array.isArray(friends) ? friends.length : 0,
+            level,
+            totalActivity,
+          },
+          premium: premiumData ? {
+            active: true,
+            expiresAt: premiumData.expiresAt ?? null,
+            permanent: premiumData.permanent ?? false,
+          } : null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/stats/user/${userId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch user stats."));
+    }
+  });
+
+  /**
+   * GET /api/stats/guild/:guildId
+   * Get guild statistics (commands used, songs played, etc.)
+   */
+  app.get("/api/stats/guild/:guildId", auth, async (req, res) => {
+    const { guildId } = req.params;
+
+    if (!isValidDiscordId(guildId)) {
+      return res.status(400).json(errorResponse("Bad Request", "Invalid guild ID format."));
+    }
+
+    try {
+      const [commandsUsed, songsPlayed, premiumData, prefix, is247] = await Promise.all([
+        safeGet(client.db.stats.commandsUsed, guildId),
+        safeGet(client.db.stats.songsPlayed, guildId),
+        safeGet(client.db.serverstaff, guildId),
+        safeGet(client.db.prefix, guildId),
+        safeHas(client.db.twoFourSeven, guildId),
+      ]);
+
+      const guild = client.guilds.cache.get(guildId);
+
+      res.json(
+        successResponse({
+          guildId,
+          guildName: guild?.name ?? null,
+          icon: guild?.iconURL({ forceStatic: false, size: 256 }) ?? null,
+          memberCount: guild?.memberCount ?? null,
+          stats: {
+            commandsUsed: commandsUsed ?? 0,
+            songsPlayed: songsPlayed ?? 0,
+          },
+          settings: {
+            prefix: prefix ?? client.prefix,
+            is247,
+          },
+          premium: premiumData ? {
+            active: true,
+            expiresAt: premiumData.expiresAt ?? premiumData.expires ?? null,
+            permanent: premiumData.permanent ?? false,
+          } : null,
+        }),
+      );
+    } catch (err) {
+      log(`API error on GET /api/stats/guild/${guildId}: ${err.message}`, "error");
+      res.status(500).json(errorResponse("Server Error", "Failed to fetch guild stats."));
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
   // BOT MODS MANAGEMENT ENDPOINTS
   // ══════════════════════════════════════════════════════════════════════════════
 
@@ -4468,15 +4709,9 @@ export function startApiServer(client) {
    */
   app.post("/api/ignore/:id", auth, async (req, res) => {
     const { id } = req.params;
-    const { type, reason } = req.body ?? {};
 
     if (!isValidDiscordId(id)) {
       return res.status(400).json(errorResponse("Bad Request", "Invalid ID format."));
-    }
-
-    const validTypes = ["channel", "guild"];
-    if (type && !validTypes.includes(type)) {
-      return res.status(400).json(errorResponse("Bad Request", `Type must be one of: ${validTypes.join(", ")}`));
     }
 
     try {
@@ -4485,18 +4720,13 @@ export function startApiServer(client) {
         return res.status(409).json(errorResponse("Conflict", "ID is already in the ignore list."));
       }
 
-      await client.db.ignore.set(id, {
-        type: type || "unknown",
-        reason: sanitizeString(reason, 200) || "Ignored via API",
-        addedAt: Date.now(),
-        addedBy: "API",
-      });
+      // Store as true to match bot command format
+      await client.db.ignore.set(id, true);
 
       res.json(
         successResponse({
           id,
           action: "ignored",
-          type: type || "unknown",
         }),
       );
     } catch (err) {
