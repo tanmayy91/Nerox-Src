@@ -507,7 +507,7 @@ function advancedRateLimiter(endpointLimits = new Map()) {
   }, RATE_LIMIT_CLEANUP_BUFFER_MS);
 
   return (req, res, next) => {
-    const ip = req.ip || req.connection.remoteAddress;
+    const ip = req.ip || req.connection?.remoteAddress || "unknown";
     const endpoint = req.path;
     const now = Date.now();
 
