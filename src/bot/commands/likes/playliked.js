@@ -63,7 +63,7 @@ export default class PlayLiked extends Command {
         } else {
           failedCount++;
         }
-      } catch (error) {
+      } catch {
         failedCount++;
       }
     }

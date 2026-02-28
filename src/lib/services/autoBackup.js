@@ -6,7 +6,6 @@
 import moment from "moment-timezone";
 import { unlink } from "fs/promises";
 import { fileURLToPath } from "node:url";
-import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { AttachmentBuilder } from "discord.js";
 import { createWriteStream } from "node:fs";

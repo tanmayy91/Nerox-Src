@@ -119,7 +119,7 @@ export default class ShowLiked extends Command {
     collector.on("end", async () => {
       try {
         await message.edit({ components: [] });
-      } catch (error) {
+      } catch {
         // Message might have been deleted
       }
     });

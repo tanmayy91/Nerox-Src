@@ -62,7 +62,7 @@ export default class Queue extends Command {
       });
 
       const chunked = _.chunk(queueList, 10);
-      const pages = chunked.map((chunk, pageIndex) =>
+      const pages = chunked.map((chunk, _pageIndex) =>
         client
           .embed()
           .setAuthor({

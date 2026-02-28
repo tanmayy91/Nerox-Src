@@ -1,6 +1,5 @@
 import { config } from "dotenv";
 import { log } from "./logger.js";
-import { availableParallelism } from "node:os";
 import { ClusterManager, HeartbeatManager } from "discord-hybrid-sharding";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

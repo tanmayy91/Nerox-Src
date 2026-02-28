@@ -18,7 +18,7 @@ export default class PlayerButtonClick {
       if (!player || interaction.message.id !== playEmbedId) {
         try {
           await interaction.message.delete();
-        } catch (err) {
+        } catch {
           // Ignore errors when deleting message (might be already deleted)
         }
         return;
