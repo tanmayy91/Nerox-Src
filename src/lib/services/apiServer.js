@@ -3708,9 +3708,10 @@ export function startApiServer(client) {
         return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
       }
 
+      const removeFromHistory = true;
       const previousTrack = typeof player.getPrevious === "function"
-        ? player.getPrevious(true)
-        : player.queue?.previous?.pop?.();
+        ? player.getPrevious(removeFromHistory)
+        : player.queue?.previous?.[player.queue.previous.length - 1];
       if (!previousTrack) {
         return res.status(400).json(errorResponse("Bad Request", "No previous track available."));
       }
@@ -4286,9 +4287,9 @@ export function startApiServer(client) {
       const limitNum = Math.min(parseInt(limit) || 50, 100);
       const offsetNum = parseInt(offset) || 0;
 
-      const songs = likedSongs.slice(offsetNum, offsetNum + limitNum).map((song, i) => ({
+      const songs = likedSongs.slice(offsetNum, offsetNum + limitNum).map((song) => ({
         ...song,
-        id: song.id ?? `${offsetNum + i}-${song.uri ?? song.title ?? "liked-song"}`,
+        id: song.id ?? song.uri ?? `${song.title ?? "liked-song"}-${song.likedAt ?? song.addedAt ?? 0}`,
       }));
 
       res.json(
