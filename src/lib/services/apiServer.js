@@ -3708,13 +3708,14 @@ export function startApiServer(client) {
         return res.status(404).json(errorResponse("Not Found", "No active player in this guild."));
       }
 
-      const previousTrack = player.queue?.previous;
+      const previousTrack = typeof player.getPrevious === "function"
+        ? player.getPrevious(true)
+        : player.queue?.previous?.pop?.();
       if (!previousTrack) {
         return res.status(400).json(errorResponse("Bad Request", "No previous track available."));
       }
 
-      player.queue.unshift(previousTrack);
-      player.skip();
+      await player.play(previousTrack);
 
       res.json(
         successResponse({
@@ -4285,7 +4286,10 @@ export function startApiServer(client) {
       const limitNum = Math.min(parseInt(limit) || 50, 100);
       const offsetNum = parseInt(offset) || 0;
 
-      const songs = likedSongs.slice(offsetNum, offsetNum + limitNum);
+      const songs = likedSongs.slice(offsetNum, offsetNum + limitNum).map((song, i) => ({
+        ...song,
+        id: song.id ?? `${offsetNum + i}-${song.uri ?? song.title ?? "liked-song"}`,
+      }));
 
       res.json(
         successResponse({
@@ -4335,7 +4339,9 @@ export function startApiServer(client) {
         uri,
         thumbnail: thumbnail || null,
         durationMs: durationMs || 0,
+        length: durationMs || 0,
         addedAt: Date.now(),
+        likedAt: Date.now(),
       };
 
       likedSongs.unshift(song);
@@ -4368,7 +4374,7 @@ export function startApiServer(client) {
 
     try {
       const likedSongs = await safeGet(client.db.likedSongs, userId) || [];
-      const index = likedSongs.findIndex(s => s.id === songId);
+      const index = likedSongs.findIndex(s => s.id === songId || s.uri === songId);
 
       if (index === -1) {
         return res.status(404).json(errorResponse("Not Found", "Song not found in liked songs."));
